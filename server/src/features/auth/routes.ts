@@ -6,6 +6,7 @@ import {
   generateAccessToken,
   generateRefreshToken,
   verifyRefreshToken,
+  verifyAccessToken,
   TokenPayload,
 } from '../../lib/jwt';
 
@@ -231,7 +232,6 @@ router.get('/me', async (req: Request, res: Response) => {
     }
 
     const token = authHeader.split(' ')[1];
-    const { verifyAccessToken } = await import('../../lib/jwt');
     const payload = verifyAccessToken(token);
 
     const user = await prisma.user.findUnique({
@@ -245,8 +245,9 @@ router.get('/me', async (req: Request, res: Response) => {
     }
 
     res.json({ user });
-  } catch {
-    res.status(401).json({ error: 'Invalid token' });
+  } catch (error: any) {
+    console.error('[Auth] verify error:', error);
+    res.status(401).json({ error: 'Invalid token', details: error?.message || 'Unknown error' });
   }
 });
 
