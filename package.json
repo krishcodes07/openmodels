@@ -8,7 +8,7 @@
     "dev:client": "cd client && npm run dev",
     "dev:server": "cd server && npm run dev",
     "build": "cd client && npm run build && cd ../server && npm run build",
-    "build:vercel": "npm install --prefix server && npm run db:generate --prefix server && npm install --prefix client && npm run build --prefix client",
+    "build:vercel": "npm install --prefix server && npm run db:generate --prefix server && npx prisma db push --schema=server/prisma/schema.prisma && npm install --prefix client && npm run build --prefix client",
     "db:generate": "cd server && npx prisma generate",
     "db:push": "cd server && npx prisma db push",
     "db:migrate": "cd server && npx prisma migrate dev",
