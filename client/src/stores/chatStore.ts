@@ -458,7 +458,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
             let nextSources = current.streamingSources[boundConversationId] || null;
 
             if (event.type === 'sources') {
-              nextSources = event.sources;
+              nextSources = event.sources ?? null;
             } else if (event.type === 'content') {
               nextContent = currentContent + (event.content || '');
             } else if (event.type === 'thinking') {
@@ -754,7 +754,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           let nextSources = get().streamingSources[streamId] || null;
 
           if (event.type === 'sources') {
-            nextSources = event.sources;
+            nextSources = event.sources ?? null;
           } else if (event.type === 'content') {
             nextContent = currentContent + (event.content || '');
           } else if (event.type === 'thinking') {
