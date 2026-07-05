@@ -1,0 +1,163 @@
+// OpenModels Database Schema
+// PostgreSQL + Prisma ORM
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// User & Authentication
+// ============================================
+
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  name          String?
+  avatar        String?
+  password      String?   // null for OAuth-only users
+  authProvider  AuthProvider @default(EMAIL)
+  googleId      String?   @unique
+
+  // Relations
+  conversations Conversation[]
+  apiKeys       UserApiKey[]
+  settings      UserSettings?
+  usageLogs     UsageLog[]
+
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@map("users")
+}
+
+enum AuthProvider {
+  EMAIL
+  GOOGLE
+}
+
+// ============================================
+// Conversations & Messages
+// ============================================
+
+model Conversation {
+  id          String    @id @default(cuid())
+  title       String    @default("New Chat")
+  userId      String
+  providerId  String    // e.g. "nvidia", "groq"
+  modelId     String    // e.g. "meta/llama-3.1-8b-instruct"
+
+  // Relations
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages    Message[]
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([userId])
+  @@map("conversations")
+}
+
+model Message {
+  id              String    @id @default(cuid())
+  conversationId  String
+  role            MessageRole
+  content         String
+  
+  // Optional metadata
+  thinkingContent String?   // For thinking mode responses
+  imageUrls       String[]  // For vision messages
+  tokenCount      Int?
+  sources         String?   // JSON string of web search sources used
+
+  // Regeneration versioning: multiple ASSISTANT responses can share the same parentMessageId
+  // (the USER message they respond to). Only the latest is "active".
+  parentMessageId String?   // ID of the USER message this is a response to
+
+  // Relations
+  conversation    Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  createdAt       DateTime  @default(now())
+
+  @@index([conversationId])
+  @@map("messages")
+}
+
+enum MessageRole {
+  USER
+  ASSISTANT
+  SYSTEM
+}
+
+// ============================================
+// Usage Tracking
+// ============================================
+
+model UsageLog {
+  id          String    @id @default(cuid())
+  userId      String
+  providerId  String
+  modelId     String
+  
+  promptTokens    Int     @default(0)
+  completionTokens Int    @default(0)
+  totalTokens     Int     @default(0)
+  
+  webSearch   Boolean   @default(false)
+  
+  // Relations
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  createdAt   DateTime  @default(now())
+  
+  @@index([userId])
+  @@index([userId, createdAt])
+  @@map("usage_logs")
+}
+
+// ============================================
+// Provider API Keys
+// ============================================
+
+model UserApiKey {
+  id          String    @id @default(cuid())
+  userId      String
+  providerId  String    // e.g. "nvidia", "groq"
+  encryptedKey String   // AES-256-GCM encrypted
+  iv          String    // Initialization vector
+  authTag     String    // Authentication tag
+
+  // Relations
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@unique([userId, providerId])
+  @@map("user_api_keys")
+}
+
+// ============================================
+// User Settings
+// ============================================
+
+model UserSettings {
+  id                  String    @id @default(cuid())
+  userId              String    @unique
+  defaultProviderId   String?
+  defaultModelId      String?
+  theme               String    @default("dark")
+  systemPrompt        String?
+
+  // Relations
+  user                User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  @@map("user_settings")
+}

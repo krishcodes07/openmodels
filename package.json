@@ -1,0 +1,20 @@
+{
+  "name": "openmodels",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Multi-provider AI chat platform",
+  "scripts": {
+    "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
+    "dev:client": "cd client && npm run dev",
+    "dev:server": "cd server && npm run dev",
+    "build": "cd client && npm run build && cd ../server && npm run build",
+    "build:vercel": "npm install --prefix server && npm run db:generate --prefix server && npm install --prefix client && npm run build --prefix client",
+    "db:generate": "cd server && npx prisma generate",
+    "db:push": "cd server && npx prisma db push",
+    "db:migrate": "cd server && npx prisma migrate dev",
+    "db:studio": "cd server && npx prisma studio"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0"
+  }
+}

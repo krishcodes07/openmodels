@@ -1,0 +1,6 @@
+## Improving Code and Finding Potential Bugs or Issues
+We have created a very big project now, as the project becoming big I want you to go through the entire project (Client and Server) and try to find the bugs or issues in the project and try to fix them. 
+Also if we can make the code more better in like we are doing like this but that will be a better dynamic way to do this, think like professional coder, I want eveything organized properly, because later I will push this into github, this will going to be open source project, so if a new person came he can go through entire code easily, so he can also contibute.
+And remember I am not saying you to change the functionality of the project, I am just saying you to make the code more better, organized, and dynamic.
+ALso one more thing make it reponsive for mobile devices, it is reponsive but in some places it is not looking good, so check and fix it also.
+Also create a professional README file for this project. As we move forward we will update it wisely
