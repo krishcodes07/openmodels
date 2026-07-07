@@ -5,7 +5,6 @@ import { useAuthStore } from '../../stores/authStore';
 import { Sidebar } from '../sidebar/Sidebar';
 import {
   ArrowLeft,
-  Sparkles,
   Plus,
   Trash2,
   MessageSquare,
