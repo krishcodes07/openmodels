@@ -2,13 +2,11 @@ import { Router, Request, Response } from 'express';
 import { prisma } from '../../lib/prisma';
 import { authenticate, optionalAuthenticate } from '../../middleware/auth';
 import { providerRegistry } from '../../providers/registry';
-import { decrypt } from '../../lib/encryption';
 import { ChatMessage } from '../../providers/base.provider';
 import { config } from '../../config';
-import { searchWeb, getFirecrawlApiKey } from '../../lib/search';
+import { ChatService } from './ChatService';
 import multer from 'multer';
 import path from 'path';
-import fs from 'fs';
 
 const router = Router();
 
@@ -46,37 +44,6 @@ router.post('/upload', optionalAuthenticate, upload.array('files', 10), (req: Re
   }
 });
 
-// Generate AI title for a conversation using the same provider
-async function generateTitle(providerId: string, modelId: string, userMessage: string, apiKey?: string): Promise<string> {
-  try {
-    const provider = providerRegistry.get(providerId);
-    if (!provider) return userMessage.substring(0, 60);
-
-    const platformKey = (config.providers as any)[providerId]?.apiKey || '';
-    const key = apiKey || platformKey;
-    if (!key) return userMessage.substring(0, 60);
-
-    const response = await provider.chat({
-      model: modelId,
-      messages: [
-        {
-          role: 'system',
-          content: 'Generate a very short title (3-6 words max) for this conversation. Return ONLY the title text, nothing else. No quotes, no explanations.',
-        },
-        { role: 'user', content: userMessage.substring(0, 500) },
-      ],
-      maxTokens: 30,
-      temperature: 0.5,
-    }, key);
-
-    const title = response.content.trim().replace(/^["']|["']$/g, '').substring(0, 80);
-    return title || userMessage.substring(0, 60);
-  } catch (err) {
-    console.error('[Chat] Title generation failed:', err);
-    return userMessage.substring(0, 60);
-  }
-}
-
 // POST /api/chat
 router.post('/', optionalAuthenticate, async (req: Request, res: Response) => {
   try {
@@ -96,18 +63,7 @@ router.post('/', optionalAuthenticate, async (req: Request, res: Response) => {
     // Get user's API key for this provider if authenticated
     let userApiKey: string | undefined;
     if (req.user) {
-      const storedKey = await prisma.userApiKey.findUnique({
-        where: {
-          userId_providerId: {
-            userId: req.user.userId,
-            providerId,
-          },
-        },
-      });
-
-      if (storedKey) {
-        userApiKey = decrypt(storedKey.encryptedKey, storedKey.iv, storedKey.authTag);
-      }
+      userApiKey = await ChatService.getUserApiKey(req.user.userId, providerId);
     }
 
     // Check if using server key
@@ -148,7 +104,7 @@ router.post('/', optionalAuthenticate, async (req: Request, res: Response) => {
       boundConversationId = conversation.id;
     }
 
-    // Set up SSE headers early so asynchronous tasks (like parallel title generation) can safely call res.write()
+    // Set up SSE headers early
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');
@@ -158,7 +114,7 @@ router.post('/', optionalAuthenticate, async (req: Request, res: Response) => {
     let titlePromise: Promise<string> | undefined;
     const isNew = req.user ? isNewConversation : (!req.body.messages || req.body.messages.length <= 1);
     if (isNew) {
-      titlePromise = generateTitle(providerId, modelId, message, userApiKey).then(async (title) => {
+      titlePromise = ChatService.generateTitle(providerId, modelId, message, userApiKey).then(async (title) => {
         try {
           if (req.user) {
             await prisma.conversation.update({
@@ -192,81 +148,37 @@ router.post('/', optionalAuthenticate, async (req: Request, res: Response) => {
 
     // Handle web search if requested
     let finalUserMessage = message;
+    let sourcesJson: string | null = null;
     if (webSearch) {
-      try {
-        // Get user's Firecrawl API key if they have one
-        let userFirecrawlKey: string | undefined;
-        if (req.user) {
-          const storedFcKey = await prisma.userApiKey.findUnique({
-            where: {
-              userId_providerId: {
-                userId: req.user.userId,
-                providerId: 'firecrawl',
-              },
-            },
-          });
-          if (storedFcKey) {
-            userFirecrawlKey = decrypt(storedFcKey.encryptedKey, storedFcKey.iv, storedFcKey.authTag);
-          }
-        }
-
-        // Build conversation history for query generation
-        let historyForSearch = [];
-        if (req.user && conversation) {
-          historyForSearch = conversation.messages.map(m => ({
-            role: m.role.toLowerCase(),
-            content: m.content,
-          }));
-        } else if (req.body.messages) {
-          historyForSearch = req.body.messages.map((m: any) => ({
-            role: m.role.toLowerCase(),
-            content: m.content,
-          }));
-        }
-
-        const searchContext = await searchWeb(
-          message,
-          historyForSearch,
-          providerId,
-          modelId,
-          userApiKey,
-          userFirecrawlKey
-        );
-        finalUserMessage = `[Web Search Results]\n${searchContext}\n\n[User Query]\n${message}`;
-
-        // Extract source URLs from search context for the Sources sidebar
-        const sourceLines = searchContext.split('\n');
-        const sources: { title: string; url: string; description: string }[] = [];
-        let currentSource: any = {};
-        for (const line of sourceLines) {
-          if (line.startsWith('Title: ')) currentSource.title = line.substring(7);
-          if (line.startsWith('URL: ')) currentSource.url = line.substring(5);
-          if (line.startsWith('Content:')) {
-            currentSource.description = '';
-          } else if (currentSource.description !== undefined && !line.startsWith('[Source') && !line.startsWith('---') && !line.startsWith('Title:') && !line.startsWith('URL:') && !line.startsWith('Search queries')) {
-            currentSource.description = (currentSource.description + ' ' + line).trim().substring(0, 200);
-          }
-          if (line.startsWith('---') || line.startsWith('[Source')) {
-            if (currentSource.url) sources.push({ ...currentSource });
-            currentSource = {};
-          }
-        }
-        if (currentSource.url) sources.push(currentSource);
-
-        // Send sources to frontend
-        (res as any).sourcesJson = JSON.stringify(sources);
-      } catch (err) {
-        console.error('[Chat] Web search execution error:', err);
+      let historyForSearch = [];
+      if (req.user && conversation) {
+        historyForSearch = conversation.messages.map(m => ({
+          role: m.role.toLowerCase(),
+          content: m.content,
+        }));
+      } else if (req.body.messages) {
+        historyForSearch = req.body.messages.map((m: any) => ({
+          role: m.role.toLowerCase(),
+          content: m.content,
+        }));
       }
+
+      const searchResult = await ChatService.executeWebSearch(
+        req.user?.userId,
+        message,
+        historyForSearch,
+        providerId,
+        modelId,
+        userApiKey
+      );
+      finalUserMessage = searchResult.finalPrompt;
+      sourcesJson = searchResult.sourcesJson;
     }
 
     // Fetch user settings to get custom system instruction prompt
     let systemPrompt: string | undefined;
     if (req.user) {
-      const settings = await prisma.userSettings.findUnique({
-        where: { userId: req.user.userId },
-      });
-      systemPrompt = settings?.systemPrompt || undefined;
+      systemPrompt = await ChatService.getSystemPrompt(req.user.userId);
     }
 
     // Build message history
@@ -301,16 +213,14 @@ router.post('/', optionalAuthenticate, async (req: Request, res: Response) => {
       { role: 'user' as const, content: finalUserMessage, imageUrls: imageUrls || [] }
     );
 
-    // SSE headers are already set early in the request lifecycle
-
     // Send usingServerKey flag right away
     if (usingServerKey) {
       res.write(`data: ${JSON.stringify({ type: 'info', usingServerKey: true })}\n\n`);
     }
 
     // Send sources if web search produced them
-    if ((res as any).sourcesJson) {
-      res.write(`data: ${JSON.stringify({ type: 'sources', sources: JSON.parse((res as any).sourcesJson) })}\n\n`);
+    if (sourcesJson) {
+      res.write(`data: ${JSON.stringify({ type: 'sources', sources: JSON.parse(sourcesJson) })}\n\n`);
     }
 
     let fullContent = '';
@@ -341,7 +251,7 @@ router.post('/', optionalAuthenticate, async (req: Request, res: Response) => {
         userApiKey
       );
 
-      // Save assistant message — always to the original conversation (only if authenticated)
+      // Save assistant message (only if authenticated)
       if (req.user) {
         try {
           await prisma.message.create({
@@ -350,7 +260,7 @@ router.post('/', optionalAuthenticate, async (req: Request, res: Response) => {
               role: 'ASSISTANT',
               content: fullContent,
               thinkingContent: thinkingContent || null,
-              sources: (res as any).sourcesJson || null,
+              sources: sourcesJson || null,
               parentMessageId: userMsgId,
             },
           });
@@ -361,7 +271,7 @@ router.post('/', optionalAuthenticate, async (req: Request, res: Response) => {
             data: { updatedAt: new Date() },
           });
         } catch (dbErr: any) {
-          console.warn('[Chat] Failed to save assistant message or update conversation timestamp (conversation may have been deleted during stream):', dbErr.message);
+          console.warn('[Chat] Failed to save assistant message:', dbErr.message);
         }
 
         // Log usage
@@ -378,13 +288,12 @@ router.post('/', optionalAuthenticate, async (req: Request, res: Response) => {
           },
         }).catch(e => console.error('[Chat] Usage log failed:', e));
 
-        // Wait for title generation to finish if it's running, to make sure it gets saved and sent before res.end()
         if (titlePromise) {
           await titlePromise.catch(() => {});
         }
       }
 
-      // Send done event now that DB write has finished
+      // Send done event
       res.write(`data: ${JSON.stringify({ type: 'done', conversationId: boundConversationId })}\n\n`);
 
     } catch (error: any) {
@@ -398,7 +307,7 @@ router.post('/', optionalAuthenticate, async (req: Request, res: Response) => {
                 role: 'ASSISTANT',
                 content: fullContent + ' 🟥 *[Response stopped by user]*',
                 thinkingContent: thinkingContent || null,
-                sources: (res as any).sourcesJson || null,
+                sources: sourcesJson || null,
                 parentMessageId: userMsgId,
               },
             });
@@ -424,7 +333,7 @@ router.post('/', optionalAuthenticate, async (req: Request, res: Response) => {
   }
 });
 
-// POST /api/chat/regenerate - Regenerate response for a given message
+// POST /api/chat/regenerate
 router.post('/regenerate', authenticate, async (req: Request, res: Response) => {
   try {
     const { conversationId, messageId, providerId, modelId, thinking, webSearch } = req.body;
@@ -441,13 +350,7 @@ router.post('/regenerate', authenticate, async (req: Request, res: Response) => 
     }
 
     // Get user API key
-    let userApiKey: string | undefined;
-    const storedKey = await prisma.userApiKey.findUnique({
-      where: { userId_providerId: { userId: req.user!.userId, providerId } },
-    });
-    if (storedKey) {
-      userApiKey = decrypt(storedKey.encryptedKey, storedKey.iv, storedKey.authTag);
-    }
+    const userApiKey = await ChatService.getUserApiKey(req.user!.userId, providerId);
 
     // Get conversation with messages up to and including the target user message
     const conversation = await prisma.conversation.findFirst({
@@ -465,82 +368,39 @@ router.post('/regenerate', authenticate, async (req: Request, res: Response) => 
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');
 
-    // Find the target user message
+    // Find target user message
     const targetMsgIndex = conversation.messages.findIndex(m => m.id === messageId);
     if (targetMsgIndex === -1) {
       res.status(404).json({ error: 'Message not found' });
       return;
     }
 
-    // Build history up to (but excluding) the target message
     const historyMessages = conversation.messages.slice(0, targetMsgIndex);
     const targetMessage = conversation.messages[targetMsgIndex];
 
-    // Handle web search if requested
+    // Handle web search
     let finalUserMessage = targetMessage.content;
     let sourcesJson: string | null = null;
     if (webSearch) {
-      try {
-        // Get user's Firecrawl API key if they have one
-        let userFirecrawlKey: string | undefined;
-        const storedFcKey = await prisma.userApiKey.findUnique({
-          where: {
-            userId_providerId: {
-              userId: req.user!.userId,
-              providerId: 'firecrawl',
-            },
-          },
-        });
-        if (storedFcKey) {
-          userFirecrawlKey = decrypt(storedFcKey.encryptedKey, storedFcKey.iv, storedFcKey.authTag);
-        }
+      const historyForSearch = historyMessages.map(m => ({
+        role: m.role.toLowerCase(),
+        content: m.content,
+      }));
 
-        // Build conversation history for query generation
-        const historyForSearch = historyMessages.map(m => ({
-          role: m.role.toLowerCase(),
-          content: m.content,
-        }));
-
-        const searchContext = await searchWeb(
-          targetMessage.content,
-          historyForSearch,
-          providerId,
-          modelId,
-          userApiKey,
-          userFirecrawlKey
-        );
-        finalUserMessage = `[Web Search Results]\n${searchContext}\n\n[User Query]\n${targetMessage.content}`;
-
-        // Extract source URLs
-        const sourceLines = searchContext.split('\n');
-        const sources: { title: string; url: string; description: string }[] = [];
-        let currentSource: any = {};
-        for (const line of sourceLines) {
-          if (line.startsWith('Title: ')) currentSource.title = line.substring(7);
-          if (line.startsWith('URL: ')) currentSource.url = line.substring(5);
-          if (line.startsWith('Content:')) {
-            currentSource.description = '';
-          } else if (currentSource.description !== undefined && !line.startsWith('[Source') && !line.startsWith('---') && !line.startsWith('Title:') && !line.startsWith('URL:') && !line.startsWith('Search queries')) {
-            currentSource.description = (currentSource.description + ' ' + line).trim().substring(0, 200);
-          }
-          if (line.startsWith('---') || line.startsWith('[Source')) {
-            if (currentSource.url) sources.push({ ...currentSource });
-            currentSource = {};
-          }
-        }
-        if (currentSource.url) sources.push(currentSource);
-
-        sourcesJson = JSON.stringify(sources);
-      } catch (err) {
-        console.error('[Chat] Web search execution error in regenerate:', err);
-      }
+      const searchResult = await ChatService.executeWebSearch(
+        req.user!.userId,
+        targetMessage.content,
+        historyForSearch,
+        providerId,
+        modelId,
+        userApiKey
+      );
+      finalUserMessage = searchResult.finalPrompt;
+      sourcesJson = searchResult.sourcesJson;
     }
 
-    // Fetch user settings to get custom system instruction prompt
-    const settings = await prisma.userSettings.findUnique({
-      where: { userId: req.user!.userId },
-    });
-    const systemPrompt = settings?.systemPrompt;
+    // Fetch user settings
+    const systemPrompt = await ChatService.getSystemPrompt(req.user!.userId);
 
     const chatMessages: ChatMessage[] = [];
     if (systemPrompt && systemPrompt.trim()) {
@@ -560,9 +420,6 @@ router.post('/regenerate', authenticate, async (req: Request, res: Response) => 
       { role: 'user' as const, content: finalUserMessage, imageUrls: targetMessage.imageUrls || [] }
     );
 
-    // SSE headers are already set early
-
-    // Send sources if web search produced them
     if (sourcesJson) {
       res.write(`data: ${JSON.stringify({ type: 'sources', sources: JSON.parse(sourcesJson) })}\n\n`);
     }
@@ -590,7 +447,6 @@ router.post('/regenerate', authenticate, async (req: Request, res: Response) => 
       );
 
       try {
-        // Save as a new assistant message linked to the same user message
         const newMsg = await prisma.message.create({
           data: {
             conversationId,
@@ -602,10 +458,9 @@ router.post('/regenerate', authenticate, async (req: Request, res: Response) => 
           },
         });
 
-        // Send the new message ID so frontend can track versions
         res.write(`data: ${JSON.stringify({ type: 'regenerated', newMessageId: newMsg.id, parentMessageId: messageId })}\n\n`);
       } catch (dbErr: any) {
-        console.warn('[Chat] Failed to save regenerated assistant response (conversation may have been deleted):', dbErr.message);
+        console.warn('[Chat] Failed to save regenerated response:', dbErr.message);
       }
 
       // Log usage
@@ -622,7 +477,6 @@ router.post('/regenerate', authenticate, async (req: Request, res: Response) => 
         },
       }).catch(e => console.error('[Chat] Usage log failed:', e));
 
-      // Send done event now that DB write has finished
       res.write(`data: ${JSON.stringify({ type: 'done', conversationId })}\n\n`);
 
     } catch (error: any) {
@@ -641,7 +495,7 @@ router.post('/regenerate', authenticate, async (req: Request, res: Response) => 
               },
             });
           } catch (dbErr) {
-            console.warn('[Chat] Failed to save partial regenerated message on disconnect:', dbErr);
+            console.warn('[Chat] Failed to save partial regenerated message:', dbErr);
           }
         }
         return;
@@ -658,7 +512,7 @@ router.post('/regenerate', authenticate, async (req: Request, res: Response) => 
   }
 });
 
-// POST /api/chat/edit - Edit a user message and regenerate response from that point
+// POST /api/chat/edit
 router.post('/edit', authenticate, async (req: Request, res: Response) => {
   try {
     const { conversationId, messageId, content, providerId, modelId, thinking, webSearch } = req.body;
@@ -674,7 +528,6 @@ router.post('/edit', authenticate, async (req: Request, res: Response) => {
       return;
     }
 
-    // Get the target user message
     const targetMessage = await prisma.message.findFirst({
       where: { id: messageId, conversationId, role: 'USER' },
     });
@@ -684,7 +537,7 @@ router.post('/edit', authenticate, async (req: Request, res: Response) => {
       return;
     }
 
-    // 1. Delete all messages created after the target user message in this conversation
+    // Delete messages created after target user message
     await prisma.message.deleteMany({
       where: {
         conversationId,
@@ -692,7 +545,7 @@ router.post('/edit', authenticate, async (req: Request, res: Response) => {
       },
     });
 
-    // 2. Update the target user message's content
+    // Update target user message's content
     const updatedTargetMessage = await prisma.message.update({
       where: { id: messageId },
       data: { content },
@@ -705,15 +558,8 @@ router.post('/edit', authenticate, async (req: Request, res: Response) => {
     });
 
     // Get user API key
-    let userApiKey: string | undefined;
-    const storedKey = await prisma.userApiKey.findUnique({
-      where: { userId_providerId: { userId: req.user!.userId, providerId } },
-    });
-    if (storedKey) {
-      userApiKey = decrypt(storedKey.encryptedKey, storedKey.iv, storedKey.authTag);
-    }
+    const userApiKey = await ChatService.getUserApiKey(req.user!.userId, providerId);
 
-    // Get conversation with messages up to and including the updated target user message
     const conversation = await prisma.conversation.findFirst({
       where: { id: conversationId, userId: req.user!.userId },
       include: { messages: { orderBy: { createdAt: 'asc' } } },
@@ -729,70 +575,32 @@ router.post('/edit', authenticate, async (req: Request, res: Response) => {
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');
 
-    // Build history up to (but excluding) the target message
     const targetMsgIndex = conversation.messages.findIndex(m => m.id === messageId);
     const historyMessages = conversation.messages.slice(0, targetMsgIndex);
 
-    // Handle web search if requested
+    // Handle web search
     let finalUserMessage = content;
     let sourcesJson: string | null = null;
     if (webSearch) {
-      try {
-        let userFirecrawlKey: string | undefined;
-        const storedFcKey = await prisma.userApiKey.findUnique({
-          where: {
-            userId_providerId: {
-              userId: req.user!.userId,
-              providerId: 'firecrawl',
-            },
-          },
-        });
-        if (storedFcKey) {
-          userFirecrawlKey = decrypt(storedFcKey.encryptedKey, storedFcKey.iv, storedFcKey.authTag);
-        }
+      const historyForSearch = historyMessages.map(m => ({
+        role: m.role.toLowerCase(),
+        content: m.content,
+      }));
 
-        const historyForSearch = historyMessages.map(m => ({
-          role: m.role.toLowerCase(),
-          content: m.content,
-        }));
-
-        const searchContext = await searchWeb(
-          content,
-          historyForSearch,
-          providerId,
-          modelId,
-          userApiKey,
-          userFirecrawlKey
-        );
-        finalUserMessage = `[Web Search Results]\n${searchContext}\n\n[User Query]\n${content}`;
-
-        const sourceLines = searchContext.split('\n');
-        const sources: { title: string; url: string; description: string }[] = [];
-        let currentSource: any = {};
-        for (const line of sourceLines) {
-          if (line.startsWith('Title: ')) currentSource.title = line.substring(7);
-          if (line.startsWith('URL: ')) currentSource.url = line.substring(5);
-          if (line.startsWith('Content:')) {
-            currentSource.description = '';
-          } else if (currentSource.description !== undefined && !line.startsWith('[Source') && !line.startsWith('---') && !line.startsWith('Title:') && !line.startsWith('URL:') && !line.startsWith('Search queries')) {
-            currentSource.description = (currentSource.description + ' ' + line).trim().substring(0, 200);
-          }
-          if (line.startsWith('---') || line.startsWith('[Source')) {
-            if (currentSource.url) sources.push({ ...currentSource });
-            currentSource = {};
-          }
-        }
-        if (currentSource.url) sources.push(currentSource);
-        sourcesJson = JSON.stringify(sources);
-      } catch (err) {
-        console.error('[Chat] Web search execution error in edit:', err);
-      }
+      const searchResult = await ChatService.executeWebSearch(
+        req.user!.userId,
+        content,
+        historyForSearch,
+        providerId,
+        modelId,
+        userApiKey
+      );
+      finalUserMessage = searchResult.finalPrompt;
+      sourcesJson = searchResult.sourcesJson;
     }
 
-    const settings = await prisma.userSettings.findUnique({
-      where: { userId: req.user!.userId },
-    });
-    const systemPrompt = settings?.systemPrompt;
+    // Fetch user settings
+    const systemPrompt = await ChatService.getSystemPrompt(req.user!.userId);
 
     const chatMessages: ChatMessage[] = [];
     if (systemPrompt && systemPrompt.trim()) {
@@ -838,23 +646,18 @@ router.post('/edit', authenticate, async (req: Request, res: Response) => {
         userApiKey
       );
 
-      try {
-        const newMsg = await prisma.message.create({
-          data: {
-            conversationId,
-            role: 'ASSISTANT',
-            content: fullContent,
-            thinkingContent: thinkingContent || null,
-            parentMessageId: messageId,
-            sources: sourcesJson || null,
-          },
-        });
+      await prisma.message.create({
+        data: {
+          conversationId,
+          role: 'ASSISTANT',
+          content: fullContent,
+          thinkingContent: thinkingContent || null,
+          parentMessageId: messageId,
+          sources: sourcesJson || null,
+        },
+      });
 
-        // Trigger done
-        res.write(`data: ${JSON.stringify({ type: 'done', conversationId })}\n\n`);
-      } catch (dbErr: any) {
-        console.warn('[Chat] Failed to save edited assistant response:', dbErr.message);
-      }
+      res.write(`data: ${JSON.stringify({ type: 'done', conversationId })}\n\n`);
     } catch (error: any) {
       if (error.message === 'Client disconnected' || res.destroyed || res.writableEnded) {
         if (fullContent.trim()) {
@@ -870,7 +673,7 @@ router.post('/edit', authenticate, async (req: Request, res: Response) => {
               },
             });
           } catch (dbErr) {
-            console.warn('[Chat] Failed to save partial edited message on disconnect:', dbErr);
+            console.warn('[Chat] Failed to save partial edited response:', dbErr);
           }
         }
         return;
