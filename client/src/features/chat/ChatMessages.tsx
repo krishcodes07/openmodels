@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useChatStore } from '../../stores/chatStore';
 import { useAuthStore } from '../../stores/authStore';
-import { Brain, Sparkles, ChevronUp, ChevronDown, Copy, Check, RefreshCw, ChevronLeft, ChevronRight, Globe, Play } from 'lucide-react';
+import { Brain, Sparkles, ChevronUp, ChevronDown, Copy, Check, RefreshCw, ChevronLeft, ChevronRight, Globe, Play, Pencil } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { Message } from '../../types';
@@ -128,6 +128,7 @@ export function ChatMessages() {
                 role="USER"
                 content={userMsg.content}
                 imageUrls={userMsg.imageUrls}
+                userMessageId={userMsg.id}
               />
 
               {/* Assistant Response (active version, or streaming regeneration) */}
@@ -495,9 +496,15 @@ function MessageBubble({
 }: MessageBubbleProps) {
   const isUser = role === 'USER';
   const { user } = useAuthStore();
-  const { regenerateResponse, setVersion, setSourcesOpen, activeSources, isSourcesOpen } = useChatStore();
+  const { editMessage, regenerateResponse, setVersion, setSourcesOpen, activeSources, isSourcesOpen } = useChatStore();
 
   const [copied, setCopied] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
+  const [editValue, setEditValue] = useState(content);
+
+  useEffect(() => {
+    setEditValue(content);
+  }, [content]);
 
   const handleCopy = () => {
     navigator.clipboard.writeText(content);
@@ -701,7 +708,7 @@ function MessageBubble({
 
       {/* 2. Message Body */}
       {(!isStreaming || cleanContent) && (
-        <div className={`flex items-start ${isUser ? 'justify-end' : ''}`}>
+        <div className={`flex items-start w-full ${isUser ? 'justify-end' : ''}`}>
           {/* Left Avatar (Assistant) */}
           {!isUser && (
             <div className="w-8 h-8 rounded-full bg-accent/10 border border-accent/20 flex items-center justify-center text-accent flex-shrink-0 mr-3">
@@ -709,89 +716,99 @@ function MessageBubble({
             </div>
           )}
 
-          {/* Message Content Container */}
-          <div
-            className={`${
-              isUser
-                ? 'bg-bg-secondary border border-border rounded-2xl px-4 py-2.5 max-w-[80%] text-text-primary shadow-sm relative group/userMsg'
-                : 'flex-1 min-w-0 text-text-primary pt-1'
-            }`}
-          >
-            {/* Copy button for user messages (shows on hover) */}
-            {isUser && (
-              <button
-                onClick={handleCopy}
-                className="absolute top-2 right-2 opacity-0 group-hover/userMsg:opacity-100 transition-opacity duration-200 p-1.5 rounded-lg bg-bg-tertiary border border-border/40 text-text-muted hover:text-text-primary shadow-sm cursor-pointer flex items-center justify-center"
-                title="Copy prompt"
-              >
-                {copied ? (
-                  <Check className="w-3.5 h-3.5 text-success" />
+          {isUser ? (
+            <div className={`flex flex-col items-end gap-1.5 group/userMsg ${isEditing ? 'w-[70%] md:w-full' : 'max-w-[80%]'}`}>
+              <div className={`bg-bg-secondary border border-border rounded-2xl text-text-primary shadow-sm w-full ${isEditing ? 'p-4' : 'px-4 py-2.5'}`}>
+                {isEditing ? (
+                  <div className="w-full flex flex-col">
+                    <textarea
+                      value={editValue}
+                      onChange={(e) => setEditValue(e.target.value)}
+                      className="w-full min-h-[60px] bg-transparent border-0 outline-none resize-none text-[15px] text-text-primary font-sans leading-relaxed focus:ring-0 focus:outline-none p-0"
+                      placeholder="Edit your message..."
+                      autoFocus
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+                          e.preventDefault();
+                          if (editValue.trim() && editValue.trim() !== content) {
+                            setIsEditing(false);
+                            if (userMessageId) {
+                              editMessage(userMessageId, editValue.trim());
+                            }
+                          }
+                        }
+                      }}
+                    />
+                    <div className="flex items-center justify-end gap-2 mt-3">
+                      <button
+                        onClick={() => {
+                          setIsEditing(false);
+                          setEditValue(content);
+                        }}
+                        className="px-4 py-1.5 rounded-full hover:bg-white/10 text-white text-xs font-semibold transition-all cursor-pointer bg-transparent border border-border/40"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        onClick={async () => {
+                          if (editValue.trim() && editValue.trim() !== content) {
+                            setIsEditing(false);
+                            if (userMessageId) {
+                              await editMessage(userMessageId, editValue.trim());
+                            }
+                          } else {
+                            setIsEditing(false);
+                          }
+                        }}
+                        className="px-4 py-1.5 rounded-full bg-white text-black hover:opacity-90 text-xs font-semibold shadow-sm transition-all cursor-pointer"
+                      >
+                        Send
+                      </button>
+                    </div>
+                  </div>
                 ) : (
-                  <Copy className="w-3.5 h-3.5" />
+                  <>
+                    {/* Render uploaded image attachments for User messages */}
+                    {imageUrls.length > 0 && (
+                      <div className="flex flex-row-reverse flex-wrap gap-1 mb-2 justify-start">
+                        {imageUrls.map((url, i) => (
+                          <img
+                            key={i}
+                            src={url}
+                            alt="attachment"
+                            className="w-[120px] h-[90px] object-cover rounded-lg border border-border/40"
+                            style={{ padding: '2px' }}
+                          />
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Markdown Text */}
+                    <div className="prose max-w-none text-[15px] leading-relaxed break-words">
+                      <p className="whitespace-pre-wrap m-0">{cleanContent}</p>
+                    </div>
+                  </>
                 )}
-              </button>
-            )}
-            {/* Render uploaded image attachments for User messages */}
-            {isUser && imageUrls.length > 0 && (
-              <div className="flex flex-row-reverse flex-wrap gap-1 mb-2 justify-start">
-                {imageUrls.map((url, i) => (
-                  <img
-                    key={i}
-                    src={url}
-                    alt="attachment"
-                    className="w-[120px] h-[90px] object-cover rounded-lg border border-border/40"
-                    style={{ padding: '2px' }}
-                  />
-                ))}
               </div>
-            )}
 
-            {/* Markdown Text */}
-            <div className={`prose max-w-none text-[15px] leading-relaxed break-words`}>
-              {isUser ? (
-                <p className="whitespace-pre-wrap m-0">{cleanContent}</p>
-              ) : (
-                <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{processedContent}</ReactMarkdown>
-              )}
-              {isStreaming && !isUser && (
-                <span className="inline-block w-1.5 h-4 bg-accent ml-0.5 animate-pulse" />
-              )}
-            </div>
-
-            {/* Premium action toolbar for Assistant messages (not during streaming) */}
-            {!isUser && !isStreaming && (
-              <div className="flex items-center gap-2 mt-4 text-text-muted select-none text-[11px]">
-                <div className="flex items-center gap-0.5 bg-bg-tertiary border border-border/40 rounded-lg p-0.5 shadow-sm">
-                  {/* 1. Version Switcher (on the left of copy button) */}
-                  {responses.length > 1 && (
-                    <>
-                      <button
-                        onClick={handlePrevVersion}
-                        disabled={activeIndex === 0}
-                        className="p-1.5 rounded-md hover:text-text-primary hover:bg-bg-hover disabled:opacity-30 disabled:hover:bg-transparent transition-all cursor-pointer"
-                        title="Previous version"
-                      >
-                        <ChevronLeft className="w-3.5 h-3.5" />
-                      </button>
-                      <span className="font-semibold tabular-nums text-text-secondary px-1 text-center min-w-[32px]">
-                        {activeIndex + 1}/{responses.length}
-                      </span>
-                      <button
-                        onClick={handleNextVersion}
-                        disabled={activeIndex === responses.length - 1}
-                        className="p-1.5 rounded-md hover:text-text-primary hover:bg-bg-hover disabled:opacity-30 disabled:hover:bg-transparent transition-all cursor-pointer mr-1 border-r border-border/30 pr-2"
-                        title="Next version"
-                      >
-                        <ChevronRight className="w-3.5 h-3.5" />
-                      </button>
-                    </>
+              {/* Action buttons below the user message box */}
+              {!isEditing && (
+                <div className="flex items-center gap-1 opacity-100 md:opacity-0 md:group-hover/userMsg:opacity-100 focus-within:opacity-100 transition-opacity duration-200 text-text-muted mt-1 mr-1">
+                  {/* Edit button */}
+                  {userMessageId && (
+                    <button
+                      onClick={() => setIsEditing(true)}
+                      className="p-1 hover:text-text-primary rounded transition-colors cursor-pointer flex items-center justify-center"
+                      title="Edit prompt"
+                    >
+                      <Pencil className="w-3.5 h-3.5" />
+                    </button>
                   )}
-
                   {/* Copy Button */}
                   <button
                     onClick={handleCopy}
-                    className="p-1.5 rounded-md hover:text-text-primary hover:bg-bg-hover transition-all cursor-pointer flex items-center gap-1"
-                    title="Copy response"
+                    className="p-1 hover:text-text-primary rounded transition-colors cursor-pointer flex items-center justify-center"
+                    title="Copy prompt"
                   >
                     {copied ? (
                       <Check className="w-3.5 h-3.5 text-success" />
@@ -799,36 +816,91 @@ function MessageBubble({
                       <Copy className="w-3.5 h-3.5" />
                     )}
                   </button>
-
-                  {/* Regenerate Button */}
-                  {userMessageId && (
-                    <button
-                      onClick={() => regenerateResponse(userMessageId)}
-                      className="p-1.5 rounded-md hover:text-text-primary hover:bg-bg-hover transition-all cursor-pointer flex items-center gap-1"
-                      title="Regenerate response"
-                    >
-                      <RefreshCw className="w-3.5 h-3.5" />
-                    </button>
-                  )}
-
-                  {/* Sources Button */}
-                  {sources && (
-                    <button
-                      onClick={handleToggleSources}
-                      className={`p-1.5 rounded-md transition-all cursor-pointer flex items-center gap-1 ${
-                        isSourcesOpen && activeSources && JSON.stringify(activeSources) === sources
-                          ? 'text-success bg-success/10'
-                          : 'hover:text-text-primary hover:bg-bg-hover'
-                      }`}
-                      title="View search sources"
-                    >
-                      <Globe className="w-3.5 h-3.5" />
-                    </button>
-                  )}
                 </div>
+              )}
+            </div>
+          ) : (
+            <div className="flex-1 min-w-0 text-text-primary pt-1">
+              {/* Markdown Text */}
+              <div className="prose max-w-none text-[15px] leading-relaxed break-words">
+                <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{processedContent}</ReactMarkdown>
+                {isStreaming && (
+                  <span className="inline-block w-1.5 h-4 bg-accent ml-0.5 animate-pulse" />
+                )}
               </div>
-            )}
-          </div>
+
+              {/* Premium action toolbar for Assistant messages (not during streaming) */}
+              {!isStreaming && (
+                <div className="flex items-center gap-2 mt-4 text-text-muted select-none text-[11px]">
+                  <div className="flex items-center gap-0.5 bg-bg-tertiary border border-border/40 rounded-lg p-0.5 shadow-sm">
+                    {/* 1. Version Switcher (on the left of copy button) */}
+                    {responses.length > 1 && (
+                      <>
+                        <button
+                          onClick={handlePrevVersion}
+                          disabled={activeIndex === 0}
+                          className="p-1.5 rounded-md hover:text-text-primary hover:bg-bg-hover disabled:opacity-30 disabled:hover:bg-transparent transition-all cursor-pointer"
+                          title="Previous version"
+                        >
+                          <ChevronLeft className="w-3.5 h-3.5" />
+                        </button>
+                        <span className="font-semibold tabular-nums text-text-secondary px-1 text-center min-w-[32px]">
+                          {activeIndex + 1}/{responses.length}
+                        </span>
+                        <button
+                          onClick={handleNextVersion}
+                          disabled={activeIndex === responses.length - 1}
+                          className="p-1.5 rounded-md hover:text-text-primary hover:bg-bg-hover disabled:opacity-30 disabled:hover:bg-transparent transition-all cursor-pointer mr-1 border-r border-border/30 pr-2"
+                          title="Next version"
+                        >
+                          <ChevronRight className="w-3.5 h-3.5" />
+                        </button>
+                      </>
+                    )}
+
+                    {/* Copy Button */}
+                    <button
+                      onClick={handleCopy}
+                      className="p-1.5 rounded-md hover:text-text-primary hover:bg-bg-hover transition-all cursor-pointer flex items-center gap-1"
+                      title="Copy response"
+                    >
+                      {copied ? (
+                        <Check className="w-3.5 h-3.5 text-success" />
+                      ) : (
+                        <Copy className="w-3.5 h-3.5" />
+                      )}
+                    </button>
+
+                    {/* Regenerate Button */}
+                    {userMessageId && (
+                      <button
+                        onClick={() => regenerateResponse(userMessageId)}
+                        className="p-1.5 rounded-md hover:text-text-primary hover:bg-bg-hover transition-all cursor-pointer flex items-center gap-1"
+                        title="Regenerate response"
+                      >
+                        <RefreshCw className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+
+                    {/* Sources Button */}
+                    {sources && (
+                      <button
+                        onClick={handleToggleSources}
+                        className={`p-1.5 rounded-md transition-all cursor-pointer flex items-center gap-1 ${
+                          isSourcesOpen && activeSources && JSON.stringify(activeSources) === sources
+                            ? 'text-success bg-success/10'
+                            : 'hover:text-text-primary hover:bg-bg-hover'
+                        }`}
+                        title="View search sources"
+                      >
+                        <Globe className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Right Avatar (User) */}
           {isUser && (

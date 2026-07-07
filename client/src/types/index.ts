@@ -56,6 +56,7 @@ export interface Conversation {
   title: string;
   providerId: string;
   modelId: string;
+  isPinned?: boolean;
   createdAt: string;
   updatedAt: string;
   messages?: Message[];

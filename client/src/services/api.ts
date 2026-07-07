@@ -148,7 +148,7 @@ class ApiClient {
     });
   }
 
-  updateConversation(id: string, data: { title?: string; providerId?: string; modelId?: string }) {
+  updateConversation(id: string, data: { title?: string; providerId?: string; modelId?: string; isPinned?: boolean }) {
     return this.request<any>(`/conversations/${id}`, {
       method: 'PATCH',
       body: JSON.stringify(data),
@@ -243,6 +243,61 @@ class ApiClient {
     if (!response.ok) {
       const error = await response.json().catch(() => ({ error: 'Regeneration failed' }));
       throw new Error(error.error || 'Regeneration failed');
+    }
+
+    const reader = response.body?.getReader();
+    const decoder = new TextDecoder();
+
+    if (!reader) throw new Error('No response body');
+
+    let buffer = '';
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          try {
+            const event = JSON.parse(line.slice(6));
+            onEvent(event);
+          } catch {
+            // ignore parse errors
+          }
+        }
+      }
+    }
+  }
+
+  async streamEdit(
+    data: {
+      conversationId: string;
+      messageId: string;
+      content: string;
+      providerId: string;
+      modelId: string;
+      thinking?: boolean;
+      webSearch?: boolean;
+    },
+    onEvent: (event: any) => void,
+    signal?: AbortSignal
+  ): Promise<void> {
+    const response = await fetch(`${API_BASE}/chat/edit`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(this.accessToken ? { Authorization: `Bearer ${this.accessToken}` } : {}),
+      },
+      body: JSON.stringify(data),
+      signal,
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: 'Edit failed' }));
+      throw new Error(error.error || 'Edit failed');
     }
 
     const reader = response.body?.getReader();

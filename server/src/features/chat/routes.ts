@@ -658,4 +658,233 @@ router.post('/regenerate', authenticate, async (req: Request, res: Response) => 
   }
 });
 
+// POST /api/chat/edit - Edit a user message and regenerate response from that point
+router.post('/edit', authenticate, async (req: Request, res: Response) => {
+  try {
+    const { conversationId, messageId, content, providerId, modelId, thinking, webSearch } = req.body;
+
+    if (!conversationId || !messageId || !content || !providerId || !modelId) {
+      res.status(400).json({ error: 'conversationId, messageId, content, providerId, and modelId are required' });
+      return;
+    }
+
+    const provider = providerRegistry.get(providerId);
+    if (!provider) {
+      res.status(400).json({ error: `Provider '${providerId}' not found` });
+      return;
+    }
+
+    // Get the target user message
+    const targetMessage = await prisma.message.findFirst({
+      where: { id: messageId, conversationId, role: 'USER' },
+    });
+
+    if (!targetMessage) {
+      res.status(404).json({ error: 'User message not found' });
+      return;
+    }
+
+    // 1. Delete all messages created after the target user message in this conversation
+    await prisma.message.deleteMany({
+      where: {
+        conversationId,
+        createdAt: { gt: targetMessage.createdAt },
+      },
+    });
+
+    // 2. Update the target user message's content
+    const updatedTargetMessage = await prisma.message.update({
+      where: { id: messageId },
+      data: { content },
+    });
+
+    // Update conversation timestamp
+    await prisma.conversation.update({
+      where: { id: conversationId },
+      data: { updatedAt: new Date() },
+    });
+
+    // Get user API key
+    let userApiKey: string | undefined;
+    const storedKey = await prisma.userApiKey.findUnique({
+      where: { userId_providerId: { userId: req.user!.userId, providerId } },
+    });
+    if (storedKey) {
+      userApiKey = decrypt(storedKey.encryptedKey, storedKey.iv, storedKey.authTag);
+    }
+
+    // Get conversation with messages up to and including the updated target user message
+    const conversation = await prisma.conversation.findFirst({
+      where: { id: conversationId, userId: req.user!.userId },
+      include: { messages: { orderBy: { createdAt: 'asc' } } },
+    });
+
+    if (!conversation) {
+      res.status(404).json({ error: 'Conversation not found' });
+      return;
+    }
+
+    // Set up SSE headers early
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+
+    // Build history up to (but excluding) the target message
+    const targetMsgIndex = conversation.messages.findIndex(m => m.id === messageId);
+    const historyMessages = conversation.messages.slice(0, targetMsgIndex);
+
+    // Handle web search if requested
+    let finalUserMessage = content;
+    let sourcesJson: string | null = null;
+    if (webSearch) {
+      try {
+        let userFirecrawlKey: string | undefined;
+        const storedFcKey = await prisma.userApiKey.findUnique({
+          where: {
+            userId_providerId: {
+              userId: req.user!.userId,
+              providerId: 'firecrawl',
+            },
+          },
+        });
+        if (storedFcKey) {
+          userFirecrawlKey = decrypt(storedFcKey.encryptedKey, storedFcKey.iv, storedFcKey.authTag);
+        }
+
+        const historyForSearch = historyMessages.map(m => ({
+          role: m.role.toLowerCase(),
+          content: m.content,
+        }));
+
+        const searchContext = await searchWeb(
+          content,
+          historyForSearch,
+          providerId,
+          modelId,
+          userApiKey,
+          userFirecrawlKey
+        );
+        finalUserMessage = `[Web Search Results]\n${searchContext}\n\n[User Query]\n${content}`;
+
+        const sourceLines = searchContext.split('\n');
+        const sources: { title: string; url: string; description: string }[] = [];
+        let currentSource: any = {};
+        for (const line of sourceLines) {
+          if (line.startsWith('Title: ')) currentSource.title = line.substring(7);
+          if (line.startsWith('URL: ')) currentSource.url = line.substring(5);
+          if (line.startsWith('Content:')) {
+            currentSource.description = '';
+          } else if (currentSource.description !== undefined && !line.startsWith('[Source') && !line.startsWith('---') && !line.startsWith('Title:') && !line.startsWith('URL:') && !line.startsWith('Search queries')) {
+            currentSource.description = (currentSource.description + ' ' + line).trim().substring(0, 200);
+          }
+          if (line.startsWith('---') || line.startsWith('[Source')) {
+            if (currentSource.url) sources.push({ ...currentSource });
+            currentSource = {};
+          }
+        }
+        if (currentSource.url) sources.push(currentSource);
+        sourcesJson = JSON.stringify(sources);
+      } catch (err) {
+        console.error('[Chat] Web search execution error in edit:', err);
+      }
+    }
+
+    const settings = await prisma.userSettings.findUnique({
+      where: { userId: req.user!.userId },
+    });
+    const systemPrompt = settings?.systemPrompt;
+
+    const chatMessages: ChatMessage[] = [];
+    if (systemPrompt && systemPrompt.trim()) {
+      chatMessages.push({
+        role: 'system' as const,
+        content: systemPrompt.trim(),
+        imageUrls: [],
+      });
+    }
+
+    chatMessages.push(
+      ...historyMessages.map(m => ({
+        role: m.role.toLowerCase() as 'user' | 'assistant' | 'system',
+        content: m.content,
+        imageUrls: m.imageUrls || [],
+      })),
+      { role: 'user' as const, content: finalUserMessage, imageUrls: updatedTargetMessage.imageUrls || [] }
+    );
+
+    if (sourcesJson) {
+      res.write(`data: ${JSON.stringify({ type: 'sources', sources: JSON.parse(sourcesJson) })}\n\n`);
+    }
+
+    let fullContent = '';
+    let thinkingContent = '';
+
+    try {
+      await provider.streamChat(
+        { model: modelId, messages: chatMessages, thinking, webSearch, stream: true },
+        (chunk) => {
+          if (res.destroyed || res.writableEnded) {
+            throw new Error('Client disconnected');
+          }
+          if (chunk.content) {
+            fullContent += chunk.content;
+            res.write(`data: ${JSON.stringify({ type: 'content', content: chunk.content })}\n\n`);
+          }
+          if (chunk.thinkingContent) {
+            thinkingContent += chunk.thinkingContent;
+            res.write(`data: ${JSON.stringify({ type: 'thinking', content: chunk.thinkingContent })}\n\n`);
+          }
+        },
+        userApiKey
+      );
+
+      try {
+        const newMsg = await prisma.message.create({
+          data: {
+            conversationId,
+            role: 'ASSISTANT',
+            content: fullContent,
+            thinkingContent: thinkingContent || null,
+            parentMessageId: messageId,
+            sources: sourcesJson || null,
+          },
+        });
+
+        // Trigger done
+        res.write(`data: ${JSON.stringify({ type: 'done', conversationId })}\n\n`);
+      } catch (dbErr: any) {
+        console.warn('[Chat] Failed to save edited assistant response:', dbErr.message);
+      }
+    } catch (error: any) {
+      if (error.message === 'Client disconnected' || res.destroyed || res.writableEnded) {
+        if (fullContent.trim()) {
+          try {
+            await prisma.message.create({
+              data: {
+                conversationId,
+                role: 'ASSISTANT',
+                content: fullContent + ' 🟥 *[Response stopped by user]*',
+                thinkingContent: thinkingContent || null,
+                parentMessageId: messageId,
+                sources: sourcesJson || null,
+              },
+            });
+          } catch (dbErr) {
+            console.warn('[Chat] Failed to save partial edited message on disconnect:', dbErr);
+          }
+        }
+        return;
+      }
+      res.write(`data: ${JSON.stringify({ type: 'error', error: error.message })}\n\n`);
+    }
+
+    res.end();
+  } catch (error) {
+    console.error('[Chat] Edit error:', error);
+    if (!res.headersSent) {
+      res.status(500).json({ error: 'Edit failed' });
+    }
+  }
+});
+
 export default router;

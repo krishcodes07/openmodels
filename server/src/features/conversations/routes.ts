@@ -12,12 +12,16 @@ router.get('/', async (req: Request, res: Response) => {
   try {
     const conversations = await prisma.conversation.findMany({
       where: { userId: req.user!.userId },
-      orderBy: { updatedAt: 'desc' },
+      orderBy: [
+        { isPinned: 'desc' },
+        { updatedAt: 'desc' }
+      ],
       select: {
         id: true,
         title: true,
         providerId: true,
         modelId: true,
+        isPinned: true,
         createdAt: true,
         updatedAt: true,
         _count: { select: { messages: true } },
@@ -84,7 +88,7 @@ router.post('/', async (req: Request, res: Response) => {
 router.patch('/:id', async (req: Request, res: Response) => {
   try {
     const id = req.params.id as string;
-    const { title, providerId, modelId } = req.body;
+    const { title, providerId, modelId, isPinned } = req.body;
 
     const existing = await prisma.conversation.findFirst({
       where: { id, userId: req.user!.userId },
@@ -101,6 +105,7 @@ router.patch('/:id', async (req: Request, res: Response) => {
         ...(title !== undefined && { title }),
         ...(providerId !== undefined && { providerId }),
         ...(modelId !== undefined && { modelId }),
+        ...(isPinned !== undefined && { isPinned }),
       },
     });
 

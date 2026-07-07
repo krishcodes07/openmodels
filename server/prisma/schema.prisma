@@ -50,6 +50,7 @@ model Conversation {
   userId      String
   providerId  String    // e.g. "nvidia", "groq"
   modelId     String    // e.g. "meta/llama-3.1-8b-instruct"
+  isPinned    Boolean   @default(false)
 
   // Relations
   user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)

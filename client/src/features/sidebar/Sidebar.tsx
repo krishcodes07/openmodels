@@ -13,6 +13,7 @@ import {
   Check,
   X,
   PanelLeft,
+  Pin,
 } from 'lucide-react';
 
 export function Sidebar() {
@@ -27,6 +28,7 @@ export function Sidebar() {
     deleteConversation,
     renameConversation,
     toggleSidebar,
+    togglePinConversation,
   } = useChatStore();
 
   const [searchQuery, setSearchQuery] = useState('');
@@ -37,6 +39,9 @@ export function Sidebar() {
   const filteredConversations = conversations.filter(c =>
     c.title.toLowerCase().includes(searchQuery.toLowerCase())
   );
+
+  const pinnedConvs = filteredConversations.filter(c => c.isPinned);
+  const unpinnedConvs = filteredConversations.filter(c => !c.isPinned);
 
   const handleNewChat = () => {
     createNewChat();
@@ -63,6 +68,81 @@ export function Sidebar() {
   const handleLogout = () => {
     logout();
     navigate('/auth');
+  };
+
+  const renderConvItem = (conv: typeof conversations[0]) => {
+    return (
+      <div
+        key={conv.id}
+        onMouseEnter={() => setHoveredId(conv.id)}
+        onMouseLeave={() => setHoveredId(null)}
+        className={`group flex items-center gap-2 px-2.5 py-2 rounded-lg cursor-pointer transition-colors duration-100 ${
+          currentConversation?.id === conv.id
+            ? 'bg-bg-hover text-text-primary'
+            : 'hover:bg-bg-hover/50 text-text-secondary hover:text-text-primary'
+        }`}
+        onClick={() => {
+          if (editingId !== conv.id) {
+            handleSelectConversation(conv.id);
+          }
+        }}
+      >
+        {editingId === conv.id ? (
+          <div className="flex-1 flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+            <input
+              type="text"
+              value={editTitle}
+              onChange={(e) => setEditTitle(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') handleConfirmRename(conv.id);
+                if (e.key === 'Escape') setEditingId(null);
+              }}
+              className="flex-1 bg-bg-tertiary text-xs rounded px-2 py-1 outline-none border border-accent/25"
+              autoFocus
+            />
+            <button onClick={() => handleConfirmRename(conv.id)} className="p-0.5">
+              <Check className="w-3 h-3 text-success" />
+            </button>
+            <button onClick={() => setEditingId(null)} className="p-0.5">
+              <X className="w-3 h-3 text-text-muted" />
+            </button>
+          </div>
+        ) : (
+          <>
+            <span className="flex-1 text-[13px] truncate">{conv.title}</span>
+
+            {(hoveredId === conv.id || currentConversation?.id === conv.id) && (
+              <div className="flex items-center gap-0.5 flex-shrink-0" onClick={(e) => e.stopPropagation()}>
+                {/* Pin button */}
+                <button
+                  onClick={() => togglePinConversation(conv.id)}
+                  className="p-1 rounded hover:bg-bg-active transition-colors animate-fade-in"
+                  title={conv.isPinned ? "Unpin chat" : "Pin chat"}
+                >
+                  <Pin className={`w-3 h-3 ${conv.isPinned ? 'text-accent fill-accent/20' : 'text-text-muted hover:text-text-primary'}`} />
+                </button>
+                {/* Rename button */}
+                <button
+                  onClick={() => handleStartRename(conv.id, conv.title)}
+                  className="p-1 rounded hover:bg-bg-active transition-colors animate-fade-in"
+                  title="Rename chat"
+                >
+                  <Edit3 className="w-3 h-3 text-text-muted hover:text-text-primary" />
+                </button>
+                {/* Delete button */}
+                <button
+                  onClick={() => deleteConversation(conv.id)}
+                  className="p-1 rounded hover:bg-bg-active transition-colors animate-fade-in"
+                  title="Delete chat"
+                >
+                  <Trash2 className="w-3 h-3 text-text-muted hover:text-error" />
+                </button>
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    );
   };
 
   return (
@@ -104,7 +184,7 @@ export function Sidebar() {
       </div>
 
       {/* Conversations */}
-      <div className="flex-1 overflow-y-auto px-2 space-y-px">
+      <div className="flex-1 overflow-y-auto px-2 space-y-4">
         {filteredConversations.length === 0 ? (
           <div className="text-center py-8">
             <MessageSquare className="w-6 h-6 text-text-muted mx-auto mb-2 opacity-20" />
@@ -113,66 +193,28 @@ export function Sidebar() {
             </p>
           </div>
         ) : (
-          filteredConversations.map(conv => (
-            <div
-              key={conv.id}
-              onMouseEnter={() => setHoveredId(conv.id)}
-              onMouseLeave={() => setHoveredId(null)}
-              className={`group flex items-center gap-2 px-2.5 py-2 rounded-lg cursor-pointer transition-colors duration-100 ${
-                currentConversation?.id === conv.id
-                  ? 'bg-bg-hover text-text-primary'
-                  : 'hover:bg-bg-hover/50 text-text-secondary hover:text-text-primary'
-              }`}
-              onClick={() => {
-                if (editingId !== conv.id) {
-                  handleSelectConversation(conv.id);
-                }
-              }}
-            >
-              {editingId === conv.id ? (
-                <div className="flex-1 flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
-                  <input
-                    type="text"
-                    value={editTitle}
-                    onChange={(e) => setEditTitle(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') handleConfirmRename(conv.id);
-                      if (e.key === 'Escape') setEditingId(null);
-                    }}
-                    className="flex-1 bg-bg-tertiary text-xs rounded px-2 py-1 outline-none border border-accent/25"
-                    autoFocus
-                  />
-                  <button onClick={() => handleConfirmRename(conv.id)} className="p-0.5">
-                    <Check className="w-3 h-3 text-success" />
-                  </button>
-                  <button onClick={() => setEditingId(null)} className="p-0.5">
-                    <X className="w-3 h-3 text-text-muted" />
-                  </button>
+          <>
+            {/* Pinned Section */}
+            {pinnedConvs.length > 0 && (
+              <div className="space-y-px">
+                <div className="px-2.5 py-1 text-[10px] font-bold text-text-muted uppercase tracking-wider select-none flex items-center gap-1.5">
+                  <Pin className="w-3 h-3 text-accent fill-accent/20 rotate-45" />
+                  <span>Pinned</span>
                 </div>
-              ) : (
-                <>
-                  <span className="flex-1 text-[13px] truncate">{conv.title}</span>
+                {pinnedConvs.map(conv => renderConvItem(conv))}
+              </div>
+            )}
 
-                  {(hoveredId === conv.id || currentConversation?.id === conv.id) && (
-                    <div className="flex items-center gap-0.5 flex-shrink-0" onClick={(e) => e.stopPropagation()}>
-                      <button
-                        onClick={() => handleStartRename(conv.id, conv.title)}
-                        className="p-1 rounded hover:bg-bg-active transition-colors"
-                      >
-                        <Edit3 className="w-3 h-3 text-text-muted" />
-                      </button>
-                      <button
-                        onClick={() => deleteConversation(conv.id)}
-                        className="p-1 rounded hover:bg-bg-active transition-colors"
-                      >
-                        <Trash2 className="w-3 h-3 text-text-muted hover:text-error" />
-                      </button>
-                    </div>
-                  )}
-                </>
+            {/* Recent Section */}
+            <div className="space-y-px">
+              {pinnedConvs.length > 0 && unpinnedConvs.length > 0 && (
+                <div className="px-2.5 py-1 text-[10px] font-bold text-text-muted uppercase tracking-wider select-none">
+                  Recent
+                </div>
               )}
+              {unpinnedConvs.map(conv => renderConvItem(conv))}
             </div>
-          ))
+          </>
         )}
       </div>
 

@@ -69,7 +69,9 @@ interface ChatState {
 
   sendMessage: (content: string, imageUrls?: string[]) => Promise<void>;
   regenerateResponse: (messageId: string) => Promise<void>;
+  editMessage: (messageId: string, newContent: string) => Promise<void>;
   stopResponse: (conversationId: string) => void;
+  togglePinConversation: (id: string) => Promise<void>;
 
   setVersion: (userMessageId: string, assistantMessageId: string) => void;
   setSourcesOpen: (open: boolean) => void;
@@ -188,7 +190,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
   fetchConversations: async () => {
     const isAuthenticated = useAuthStore.getState().isAuthenticated;
     if (!isAuthenticated) {
-      set(state => ({ conversations: state.anonymousConversations || [], isLoadingConversations: false }));
+      const anonConvs = get().anonymousConversations || [];
+      const sorted = [...anonConvs].sort((a, b) => {
+        const pinA = a.isPinned ? 1 : 0;
+        const pinB = b.isPinned ? 1 : 0;
+        if (pinA !== pinB) return pinB - pinA;
+        return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
+      });
+      set({ conversations: sorted, anonymousConversations: sorted, isLoadingConversations: false });
       return;
     }
     try {
@@ -402,8 +411,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
       // Set state
       const nextMessages = [...state.messages, tempUserMsg];
       const nextAnonConvs = originConversationId 
-        ? state.anonymousConversations 
+        ? state.anonymousConversations.map(c => c.id === originConversationId ? { ...c, updatedAt: new Date().toISOString() } : c)
         : [tempConversation, ...state.anonymousConversations];
+
+      const sortedAnonConvs = [...nextAnonConvs].sort((a, b) => {
+        const pinA = a.isPinned ? 1 : 0;
+        const pinB = b.isPinned ? 1 : 0;
+        if (pinA !== pinB) return pinB - pinA;
+        return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
+      });
 
       // Save user message in local history immediately
       const initialAnonMsgs = {
@@ -411,7 +427,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         [boundConversationId]: nextMessages,
       };
 
-      localStorage.setItem('anonymousConversations', JSON.stringify(nextAnonConvs));
+      localStorage.setItem('anonymousConversations', JSON.stringify(sortedAnonConvs));
       localStorage.setItem('anonymousMessages', JSON.stringify(initialAnonMsgs));
 
       const controller = new AbortController();
@@ -424,9 +440,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
         streamingContent: '',
         thinkingContent: '',
         usingServerKey: false,
-        currentConversation: tempConversation,
-        conversations: nextAnonConvs,
-        anonymousConversations: nextAnonConvs,
+        currentConversation: originConversationId ? sortedAnonConvs.find(c => c.id === originConversationId) || tempConversation : tempConversation,
+        conversations: sortedAnonConvs,
+        anonymousConversations: sortedAnonConvs,
         activeSources: null,
         activeStreams: nextStreams,
       });
@@ -1238,6 +1254,400 @@ export const useChatStore = create<ChatState>((set, get) => ({
         activeStreams: nextStreams,
         ...(isCurrent ? { isStreaming: false } : {}),
       });
+    }
+  },
+
+  editMessage: async (messageId: string, newContent: string) => {
+    const state = get();
+    const originConversationId = state.currentConversation?.id;
+    if (!originConversationId) return;
+
+    const originProviderId = state.selectedProviderId;
+    const originModelId = state.selectedModelId;
+    const isAuthenticated = useAuthStore.getState().isAuthenticated;
+
+    const controller = new AbortController();
+    const nextStreams = { ...state.activeStreams, [originConversationId]: controller };
+
+    // Find message in state
+    const targetMsgIndex = state.messages.findIndex(m => m.id === messageId);
+    if (targetMsgIndex === -1) return;
+
+    const updatedUserMsg = {
+      ...state.messages[targetMsgIndex],
+      content: newContent,
+    };
+    const nextMessages = [...state.messages.slice(0, targetMsgIndex), updatedUserMsg];
+
+    if (!isAuthenticated) {
+      // Local/Anonymous flow:
+      const nextAnonConvs = state.anonymousConversations.map(c =>
+        c.id === originConversationId ? { ...c, updatedAt: new Date().toISOString() } : c
+      );
+      const sortedAnonConvs = [...nextAnonConvs].sort((a, b) => {
+        const pinA = a.isPinned ? 1 : 0;
+        const pinB = b.isPinned ? 1 : 0;
+        if (pinA !== pinB) return pinB - pinA;
+        return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
+      });
+
+      const nextAnonMsgs = {
+        ...state.anonymousMessages,
+        [originConversationId]: nextMessages,
+      };
+
+      localStorage.setItem('anonymousConversations', JSON.stringify(sortedAnonConvs));
+      localStorage.setItem('anonymousMessages', JSON.stringify(nextAnonMsgs));
+
+      set({
+        messages: nextMessages,
+        anonymousMessages: nextAnonMsgs,
+        conversations: sortedAnonConvs,
+        anonymousConversations: sortedAnonConvs,
+        isStreaming: true,
+        streamingContent: '',
+        thinkingContent: '',
+        activeSources: null,
+        activeStreams: nextStreams,
+      });
+
+      try {
+        await api.streamChat(
+          {
+            conversationId: originConversationId,
+            message: newContent,
+            providerId: originProviderId,
+            modelId: originModelId,
+            thinking: state.thinkingEnabled,
+            webSearch: state.webSearchEnabled,
+            imageUrls: updatedUserMsg.imageUrls,
+            messages: nextMessages.slice(0, -1).map((m: any) => ({
+              role: m.role.toLowerCase(),
+              content: m.content,
+              imageUrls: m.imageUrls,
+            })),
+          },
+          (event: StreamEvent) => {
+            const current = get();
+            const currentContent = current.streamingContents[originConversationId] || '';
+            const currentThinking = current.thinkingContents[originConversationId] || '';
+            
+            let nextContent = currentContent;
+            let nextThinking = currentThinking;
+            let nextSources = current.streamingSources[originConversationId] || null;
+
+            if (event.type === 'sources') {
+              nextSources = event.sources ?? null;
+            } else if (event.type === 'content') {
+              nextContent = currentContent + (event.content || '');
+            } else if (event.type === 'thinking') {
+              nextThinking = currentThinking + (event.content || '');
+            }
+
+            const isStillViewing = current.currentConversation?.id === originConversationId;
+
+            set({
+              streamingContents: { ...current.streamingContents, [originConversationId]: nextContent },
+              thinkingContents: { ...current.thinkingContents, [originConversationId]: nextThinking },
+              streamingSources: { ...current.streamingSources, [originConversationId]: nextSources },
+              ...(isStillViewing ? {
+                ...(event.type === 'info' && event.usingServerKey ? { usingServerKey: true } : {}),
+                ...(event.type === 'sources' ? { activeSources: event.sources } : {}),
+                ...(event.type === 'content' ? { streamingContent: nextContent } : {}),
+                ...(event.type === 'thinking' ? { thinkingContent: nextThinking } : {}),
+              } : {})
+            });
+
+            if (event.type === 'done') {
+              const assistantMsg: Message = {
+                id: `msg-${Date.now()}`,
+                conversationId: originConversationId,
+                role: 'ASSISTANT',
+                content: nextContent,
+                thinkingContent: nextThinking || null,
+                sources: nextSources ? JSON.stringify(nextSources) : null,
+                createdAt: new Date().toISOString(),
+              };
+              
+              const targetHistory = get().anonymousMessages[originConversationId] || [];
+              const finalMessages = [...targetHistory, assistantMsg];
+              const finalAnonMsgs = {
+                ...get().anonymousMessages,
+                [originConversationId]: finalMessages,
+              };
+              localStorage.setItem('anonymousMessages', JSON.stringify(finalAnonMsgs));
+
+              const currentStreams = get().activeStreams;
+              const nextStreams = { ...currentStreams };
+              delete nextStreams[originConversationId];
+
+              const cleanedContents = { ...get().streamingContents };
+              delete cleanedContents[originConversationId];
+              const cleanedThinkings = { ...get().thinkingContents };
+              delete cleanedThinkings[originConversationId];
+              const cleanedSources = { ...get().streamingSources };
+              delete cleanedSources[originConversationId];
+
+              set({
+                anonymousMessages: finalAnonMsgs,
+                activeStreams: nextStreams,
+                streamingContents: cleanedContents,
+                thinkingContents: cleanedThinkings,
+                streamingSources: cleanedSources,
+                ...(isStillViewing ? {
+                  messages: finalMessages,
+                  isStreaming: false,
+                  streamingContent: '',
+                  thinkingContent: '',
+                } : {})
+              });
+            } else if (event.type === 'error') {
+              const assistantMsg: Message = {
+                id: `error-${Date.now()}`,
+                conversationId: originConversationId,
+                role: 'ASSISTANT',
+                content: `⚠️ **Error generating response:** ${event.error || 'Unknown error occurred.'}`,
+                createdAt: new Date().toISOString(),
+              };
+
+              const targetHistory = get().anonymousMessages[originConversationId] || [];
+              const finalMessages = [...targetHistory, assistantMsg];
+              const finalAnonMsgs = {
+                ...get().anonymousMessages,
+                [originConversationId]: finalMessages,
+              };
+              localStorage.setItem('anonymousMessages', JSON.stringify(finalAnonMsgs));
+
+              const currentStreams = get().activeStreams;
+              const nextStreams = { ...currentStreams };
+              delete nextStreams[originConversationId];
+
+              const cleanedContents = { ...get().streamingContents };
+              delete cleanedContents[originConversationId];
+              const cleanedThinkings = { ...get().thinkingContents };
+              delete cleanedThinkings[originConversationId];
+              const cleanedSources = { ...get().streamingSources };
+              delete cleanedSources[originConversationId];
+
+              set({
+                anonymousMessages: finalAnonMsgs,
+                activeStreams: nextStreams,
+                streamingContents: cleanedContents,
+                thinkingContents: cleanedThinkings,
+                streamingSources: cleanedSources,
+                ...(isStillViewing ? {
+                  messages: finalMessages,
+                  isStreaming: false,
+                  streamingContent: '',
+                  thinkingContent: '',
+                } : {})
+              });
+            }
+          },
+          controller.signal
+        );
+      } catch (err: any) {
+        // Handle error...
+      }
+      return;
+    }
+
+    // Authenticated Flow:
+    set({
+      messages: nextMessages,
+      isStreaming: true,
+      streamingContent: '',
+      thinkingContent: '',
+      activeSources: null,
+      activeStreams: nextStreams,
+    });
+
+    try {
+      await api.streamEdit(
+        {
+          conversationId: originConversationId,
+          messageId,
+          content: newContent,
+          providerId: originProviderId,
+          modelId: originModelId,
+          thinking: state.thinkingEnabled,
+          webSearch: state.webSearchEnabled,
+        },
+        (event: any) => {
+          const current = get();
+          const currentContent = current.streamingContents[originConversationId] || '';
+          const currentThinking = current.thinkingContents[originConversationId] || '';
+          
+          let nextContent = currentContent;
+          let nextThinking = currentThinking;
+          let nextSources = current.streamingSources[originConversationId] || null;
+
+          if (event.type === 'sources') {
+            nextSources = event.sources;
+          } else if (event.type === 'content') {
+            nextContent = currentContent + (event.content || '');
+          } else if (event.type === 'thinking') {
+            nextThinking = currentThinking + (event.content || '');
+          }
+
+          set({
+            streamingContents: { ...current.streamingContents, [originConversationId]: nextContent },
+            thinkingContents: { ...current.thinkingContents, [originConversationId]: nextThinking },
+            streamingSources: { ...current.streamingSources, [originConversationId]: nextSources },
+          });
+
+          const isStillViewing = current.currentConversation?.id === originConversationId;
+
+          if (!isStillViewing) {
+            if (event.type === 'done') {
+              const currentStreams = get().activeStreams;
+              const nextStreams = { ...currentStreams };
+              delete nextStreams[originConversationId];
+
+              const cleanedContents = { ...get().streamingContents };
+              delete cleanedContents[originConversationId];
+              const cleanedThinkings = { ...get().thinkingContents };
+              delete cleanedThinkings[originConversationId];
+              const cleanedSources = { ...get().streamingSources };
+              delete cleanedSources[originConversationId];
+
+              set({
+                activeStreams: nextStreams,
+                streamingContents: cleanedContents,
+                thinkingContents: cleanedThinkings,
+                streamingSources: cleanedSources,
+              });
+            }
+            return;
+          }
+
+          if (event.type === 'sources') {
+            set({ activeSources: event.sources });
+          } else if (event.type === 'content') {
+            set({ streamingContent: nextContent });
+          } else if (event.type === 'thinking') {
+            set({ thinkingContent: nextThinking });
+          } else if (event.type === 'done') {
+            const currentStreams = get().activeStreams;
+            const nextStreams = { ...currentStreams };
+            delete nextStreams[originConversationId];
+
+            const cleanedContents = { ...get().streamingContents };
+            delete cleanedContents[originConversationId];
+            const cleanedThinkings = { ...get().thinkingContents };
+            delete cleanedThinkings[originConversationId];
+            const cleanedSources = { ...get().streamingSources };
+            delete cleanedSources[originConversationId];
+
+            set({
+              activeStreams: nextStreams,
+              streamingContents: cleanedContents,
+              thinkingContents: cleanedThinkings,
+              streamingSources: cleanedSources,
+            });
+
+            api.getConversation(originConversationId)
+              .then((data) => {
+                set({
+                  messages: data.conversation.messages || [],
+                  isStreaming: false,
+                  streamingContent: '',
+                  thinkingContent: '',
+                  currentConversation: data.conversation,
+                });
+              })
+              .catch((err) => {
+                console.error('Failed to sync conversation after edit:', err);
+              });
+
+            setTimeout(() => get().fetchConversations(), 1000);
+          } else if (event.type === 'error') {
+            const currentStreams = get().activeStreams;
+            const nextStreams = { ...currentStreams };
+            delete nextStreams[originConversationId];
+
+            const cleanedContents = { ...get().streamingContents };
+            delete cleanedContents[originConversationId];
+            const cleanedThinkings = { ...get().thinkingContents };
+            delete cleanedThinkings[originConversationId];
+            const cleanedSources = { ...get().streamingSources };
+            delete cleanedSources[originConversationId];
+
+            set({
+              isStreaming: false,
+              streamingContent: '',
+              thinkingContent: '',
+              activeStreams: nextStreams,
+              streamingContents: cleanedContents,
+              thinkingContents: cleanedThinkings,
+              streamingSources: cleanedSources,
+            });
+            console.error('Edit stream error:', event.error);
+          }
+        },
+        controller.signal
+      );
+    } catch (error: any) {
+      const current = get();
+      if (current.currentConversation?.id === originConversationId) {
+        set({
+          isStreaming: false,
+          streamingContent: '',
+          thinkingContent: '',
+        });
+      }
+      console.error('Edit error:', error);
+    }
+  },
+
+  togglePinConversation: async (id: string) => {
+    const isAuthenticated = useAuthStore.getState().isAuthenticated;
+    if (!isAuthenticated) {
+      const state = get();
+      const nextAnonConvs = state.anonymousConversations.map(c =>
+        c.id === id ? { ...c, isPinned: !c.isPinned } : c
+      );
+      const sortedAnonConvs = [...nextAnonConvs].sort((a, b) => {
+        const pinA = a.isPinned ? 1 : 0;
+        const pinB = b.isPinned ? 1 : 0;
+        if (pinA !== pinB) return pinB - pinA;
+        return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
+      });
+      localStorage.setItem('anonymousConversations', JSON.stringify(sortedAnonConvs));
+      set({
+        anonymousConversations: sortedAnonConvs,
+        conversations: sortedAnonConvs,
+        ...(state.currentConversation?.id === id ? {
+          currentConversation: { ...state.currentConversation!, isPinned: !state.currentConversation.isPinned },
+        } : {}),
+      });
+      return;
+    }
+    try {
+      const state = get();
+      const conv = state.conversations.find(c => c.id === id);
+      if (!conv) return;
+      const nextPinned = !conv.isPinned;
+      await api.updateConversation(id, { isPinned: nextPinned });
+      
+      const updatedConvs = state.conversations.map(c =>
+        c.id === id ? { ...c, isPinned: nextPinned } : c
+      );
+      const sorted = [...updatedConvs].sort((a, b) => {
+        const pinA = a.isPinned ? 1 : 0;
+        const pinB = b.isPinned ? 1 : 0;
+        if (pinA !== pinB) return pinB - pinA;
+        return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
+      });
+      
+      set({
+        conversations: sorted,
+        ...(state.currentConversation?.id === id ? {
+          currentConversation: { ...state.currentConversation!, isPinned: nextPinned },
+        } : {}),
+      });
+    } catch (error) {
+      console.error('Failed to toggle pin conversation:', error);
     }
   },
 
