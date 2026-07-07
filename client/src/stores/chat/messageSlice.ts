@@ -27,7 +27,7 @@ export interface MessageSlice {
 
   fetchConversations: () => Promise<void>;
   loadConversation: (id: string) => Promise<void>;
-  createNewChat: () => void;
+  createNewChat: (personaId?: string) => void;
   deleteConversation: (id: string) => Promise<void>;
   renameConversation: (id: string, title: string) => Promise<void>;
   sendMessage: (content: string, imageUrls?: string[]) => Promise<void>;
@@ -111,6 +111,7 @@ export const createMessageSlice: StateCreator<ChatState, [], [], MessageSlice> =
         activeSandboxOriginalCode: null,
         activeSandboxLanguage: null,
         isSandboxOpen: false,
+        activePersonaId: conversation?.personaId || null,
       });
       if (conversation) {
         await get().fetchModels(conversation.providerId);
@@ -137,6 +138,7 @@ export const createMessageSlice: StateCreator<ChatState, [], [], MessageSlice> =
         activeSandboxOriginalCode: null,
         activeSandboxLanguage: null,
         isSandboxOpen: false,
+        activePersonaId: data.conversation.personaId || null,
       });
       await get().fetchModels(data.conversation.providerId);
     } catch (error) {
@@ -145,7 +147,7 @@ export const createMessageSlice: StateCreator<ChatState, [], [], MessageSlice> =
     }
   },
 
-  createNewChat: () => {
+  createNewChat: (personaId?: string) => {
     set({
       currentConversation: null,
       messages: [],
@@ -161,6 +163,7 @@ export const createMessageSlice: StateCreator<ChatState, [], [], MessageSlice> =
       activeSandboxOriginalCode: null,
       activeSandboxLanguage: null,
       isSandboxOpen: false,
+      activePersonaId: personaId || null,
     });
   },
 
@@ -332,6 +335,7 @@ export const createMessageSlice: StateCreator<ChatState, [], [], MessageSlice> =
               content: m.content,
               imageUrls: m.imageUrls,
             })),
+            personaId: state.activePersonaId || undefined,
           },
           (event: StreamEvent) => {
             const current = get();
@@ -584,6 +588,7 @@ export const createMessageSlice: StateCreator<ChatState, [], [], MessageSlice> =
           thinking: state.thinkingEnabled,
           webSearch: state.webSearchEnabled,
           imageUrls,
+          personaId: state.activePersonaId || undefined,
         },
         (event: StreamEvent) => {
           const current = get();

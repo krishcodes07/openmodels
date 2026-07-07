@@ -1,4 +1,6 @@
 import { prisma } from '../../lib/prisma';
+import fs from 'fs';
+import path from 'path';
 import { providerRegistry } from '../../providers/registry';
 import { decrypt } from '../../lib/encryption';
 import { searchWeb } from '../../lib/search';
@@ -139,5 +141,63 @@ export class ChatService {
       where: { userId },
     });
     return settings?.systemPrompt || undefined;
+  }
+
+  /**
+   * Seeds default personas if none exist in the database.
+   */
+  static async seedDefaultPersonas(): Promise<void> {
+    try {
+      console.log('[ChatService] Seeding default personas...');
+      const filePath = path.join(__dirname, '../personas/prebuilt_personas.json');
+      if (fs.existsSync(filePath)) {
+        const fileContent = fs.readFileSync(filePath, 'utf8');
+        const defaultPersonas = JSON.parse(fileContent);
+
+        const jsonNames = defaultPersonas.map((p: any) => p.name);
+
+        // Delete any pre-built personas no longer defined in the JSON file
+        await prisma.persona.deleteMany({
+          where: {
+            userId: null,
+            name: { notIn: jsonNames },
+          },
+        });
+
+        for (const p of defaultPersonas) {
+          const existing = await prisma.persona.findFirst({
+            where: { name: p.name, userId: null },
+          });
+
+          if (existing) {
+            await prisma.persona.update({
+              where: { id: existing.id },
+              data: {
+                description: p.description,
+                systemPrompt: p.systemPrompt,
+                imageUrl: p.imageUrl,
+                category: p.category || null,
+              },
+            });
+          } else {
+            await prisma.persona.create({
+              data: {
+                name: p.name,
+                description: p.description,
+                systemPrompt: p.systemPrompt,
+                imageUrl: p.imageUrl,
+                category: p.category || null,
+                userId: null,
+              },
+            });
+          }
+        }
+        console.log('[ChatService] Default personas seeded/updated successfully.');
+      } else {
+        console.warn(`[ChatService] Pre-built personas JSON not found at: ${filePath}`);
+      }
+    } catch (err) {
+      console.error('[ChatService] Error seeding personas:', err);
+    }
   }
 }

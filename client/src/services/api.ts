@@ -141,7 +141,7 @@ class ApiClient {
     return this.request<any>(`/conversations/${id}`);
   }
 
-  createConversation(data: { title?: string; providerId?: string; modelId?: string }) {
+  createConversation(data: { title?: string; providerId?: string; modelId?: string; personaId?: string }) {
     return this.request<any>('/conversations', {
       method: 'POST',
       body: JSON.stringify(data),
@@ -161,6 +161,24 @@ class ApiClient {
     });
   }
 
+  // Personas
+  getPersonas() {
+    return this.request<any>('/personas');
+  }
+
+  createPersona(data: { name: string; description: string; systemPrompt: string; imageUrl?: string }) {
+    return this.request<any>('/personas', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  deletePersona(id: string) {
+    return this.request<any>(`/personas/${id}`, {
+      method: 'DELETE',
+    });
+  }
+
   // Chat (SSE streaming)
   async streamChat(
     data: {
@@ -171,6 +189,7 @@ class ApiClient {
       thinking?: boolean;
       webSearch?: boolean;
       imageUrls?: string[];
+      personaId?: string;
       messages?: { role: string; content: string; imageUrls?: string[] }[];
     },
     onEvent: (event: any) => void,

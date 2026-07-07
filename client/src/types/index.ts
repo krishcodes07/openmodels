@@ -51,12 +51,26 @@ export interface Message {
   createdAt: string;
 }
 
+export interface Persona {
+  id: string;
+  name: string;
+  description: string;
+  systemPrompt: string;
+  imageUrl?: string | null;
+  userId?: string | null;
+  category?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface Conversation {
   id: string;
   title: string;
   providerId: string;
   modelId: string;
   isPinned?: boolean;
+  personaId?: string | null;
+  persona?: { id: string; name: string; imageUrl?: string | null } | null;
   createdAt: string;
   updatedAt: string;
   messages?: Message[];

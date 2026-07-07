@@ -9,6 +9,9 @@ export function ChatHeader() {
   const { isAuthenticated } = useAuthStore();
   const {
     providers,
+    currentConversation,
+    activePersonaId,
+    personas,
     models,
     selectedProviderId,
     selectedModelId,
@@ -32,6 +35,8 @@ export function ChatHeader() {
 
   const currentProvider = providers.find(p => p.id === selectedProviderId);
   const currentModel = models.find(m => m.id === selectedModelId);
+  const activePersona = currentConversation?.persona ||
+    (activePersonaId ? personas.find(p => p.id === activePersonaId) : null);
 
   // Close dropdowns on outside click
   useEffect(() => {
@@ -67,6 +72,22 @@ export function ChatHeader() {
             >
               <PanelLeft className="w-4 h-4" />
             </button>
+          )}
+
+          {/* Active Persona Badge */}
+          {activePersona && (
+            <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-lg bg-accent/8 border border-accent/15 mr-1.5 animate-fade-in select-none" title={`Active Persona: ${activePersona.name}`}>
+              <div className="w-4 h-4 rounded-full bg-accent/10 flex items-center justify-center text-[10px] overflow-hidden">
+                {activePersona.imageUrl ? (
+                  <img src={activePersona.imageUrl} alt="" className="w-full h-full object-cover" />
+                ) : (
+                  <span className="text-[8px] font-bold text-accent">
+                    {activePersona.name.substring(0, 2).toUpperCase()}
+                  </span>
+                )}
+              </div>
+              <span className="text-xs font-bold text-accent truncate max-w-[80px] sm:max-w-[120px]">{activePersona.name}</span>
+            </div>
           )}
 
           {/* Provider Selection */}

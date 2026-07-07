@@ -4,6 +4,7 @@ import { useAuthStore } from './stores/authStore';
 import { AuthPage } from './features/auth/AuthPage';
 import { ChatLayout } from './features/chat/ChatLayout';
 import { SettingsPage } from './features/settings/SettingsPage';
+import { PersonasPage } from './features/personas/PersonasPage';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated } = useAuthStore();
@@ -39,6 +40,7 @@ export default function App() {
         <Route path="/auth" element={<AuthPage />} />
         <Route path="/" element={<ChatLayout />} />
         <Route path="/chat/:conversationId" element={<ChatLayout />} />
+        <Route path="/personas" element={<PersonasPage />} />
         <Route
           path="/settings"
           element={

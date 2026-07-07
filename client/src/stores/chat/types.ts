@@ -1,4 +1,4 @@
-import type { Conversation, Message, Provider, Model } from '../../types';
+import type { Conversation, Message, Provider, Model, Persona } from '../../types';
 
 export interface ChatState {
   // Data
@@ -60,7 +60,7 @@ export interface ChatState {
 
   fetchConversations: () => Promise<void>;
   loadConversation: (id: string) => Promise<void>;
-  createNewChat: () => void;
+  createNewChat: (personaId?: string) => void;
   deleteConversation: (id: string) => Promise<void>;
   renameConversation: (id: string, title: string) => Promise<void>;
 
@@ -83,4 +83,11 @@ export interface ChatState {
   updateSandboxCode: (code: string) => void;
   closeSandbox: () => void;
   resetSandboxCode: () => void;
+
+  // Personas
+  personas: Persona[];
+  activePersonaId: string | null;
+  fetchPersonas: () => Promise<void>;
+  createPersona: (data: { name: string; description: string; systemPrompt: string; imageUrl?: string }) => Promise<void>;
+  deletePersona: (id: string) => Promise<void>;
 }

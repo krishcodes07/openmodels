@@ -28,6 +28,7 @@ model User {
   apiKeys       UserApiKey[]
   settings      UserSettings?
   usageLogs     UsageLog[]
+  personas      Persona[]
 
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
@@ -51,15 +52,18 @@ model Conversation {
   providerId  String    // e.g. "nvidia", "groq"
   modelId     String    // e.g. "meta/llama-3.1-8b-instruct"
   isPinned    Boolean   @default(false)
+  personaId   String?
 
   // Relations
   user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   messages    Message[]
+  persona     Persona?  @relation(fields: [personaId], references: [id], onDelete: SetNull)
 
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
   @@index([userId])
+  @@index([personaId])
   @@map("conversations")
 }
 
@@ -161,4 +165,29 @@ model UserSettings {
   updatedAt           DateTime  @updatedAt
 
   @@map("user_settings")
+}
+
+// ============================================
+// Personas
+// ============================================
+
+model Persona {
+  id           String   @id @default(cuid())
+  name         String
+  description  String
+  systemPrompt String
+  imageUrl     String?  // Can be a URL, base64 data-URL, or preset icon identifier
+  userId       String?  // Nullable: Null = pre-built system-wide persona. Otherwise = user-created.
+  category     String?  // Category tag for filtering (e.g. "Featured", "History", "Genius")
+
+  // Relations
+  user         User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  conversations Conversation[]
+
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([userId])
+  @@index([category])
+  @@map("personas")
 }

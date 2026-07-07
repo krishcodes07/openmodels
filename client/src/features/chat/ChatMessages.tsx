@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useMemo } from 'react';
 import { useChatStore } from '../../stores/chatStore';
 import { useAuthStore } from '../../stores/authStore';
 import { Brain, Sparkles, ChevronUp, ChevronDown, Copy, Check, RefreshCw, ChevronLeft, ChevronRight, Globe, Play, Pencil } from 'lucide-react';
@@ -17,7 +17,24 @@ export function ChatMessages() {
     activeVersionMap,
     regeneratingMessageId,
     activeSources,
+    currentConversation,
+    personas,
+    activePersonaId,
   } = useChatStore();
+
+  // Resolve the active persona's image URL
+  const personaImageUrl = useMemo(() => {
+    // First check activePersonaId (for new chats before conversation is created)
+    if (activePersonaId) {
+      const persona = personas.find(p => p.id === activePersonaId);
+      if (persona?.imageUrl) return persona.imageUrl;
+    }
+    // Then check current conversation's linked persona
+    if (currentConversation?.persona?.imageUrl) {
+      return currentConversation.persona.imageUrl;
+    }
+    return null;
+  }, [activePersonaId, personas, currentConversation]);
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const [showScrollButton, setShowScrollButton] = useState(false);
@@ -143,12 +160,19 @@ export function ChatMessages() {
                       content={streamingContent}
                       isStreaming
                       sources={activeSources ? JSON.stringify(activeSources) : null}
+                      personaImageUrl={personaImageUrl}
                     />
                   ) : !thinkingContent && (
                     <div className="flex items-start gap-3">
-                      <div className="w-8 h-8 rounded-full bg-accent/10 border border-accent/20 flex items-center justify-center text-accent flex-shrink-0">
-                        <Sparkles className="w-4 h-4 text-accent animate-pulse" />
-                      </div>
+                      {personaImageUrl ? (
+                        <div className="w-8 h-8 rounded-full overflow-hidden border border-border/50 flex-shrink-0">
+                          <img src={personaImageUrl} alt="" className="w-full h-full object-cover" />
+                        </div>
+                      ) : (
+                        <div className="w-8 h-8 rounded-full bg-accent/10 border border-accent/20 flex items-center justify-center text-accent flex-shrink-0">
+                          <Sparkles className="w-4 h-4 text-accent animate-pulse" />
+                        </div>
+                      )}
                       <div className="flex gap-1 py-3 px-1">
                         <div className="w-1.5 h-1.5 rounded-full bg-text-muted animate-pulse-dots" style={{ animationDelay: '0ms' }} />
                         <div className="w-1.5 h-1.5 rounded-full bg-text-muted animate-pulse-dots" style={{ animationDelay: '200ms' }} />
@@ -166,6 +190,7 @@ export function ChatMessages() {
                   userMessageId={userMsg.id}
                   responses={responses}
                   activeIndex={activeResponseIdx}
+                  personaImageUrl={personaImageUrl}
                 />
               ) : null}
             </div>
@@ -184,12 +209,19 @@ export function ChatMessages() {
                 content={streamingContent}
                 isStreaming
                 sources={activeSources ? JSON.stringify(activeSources) : null}
+                personaImageUrl={personaImageUrl}
               />
             ) : !thinkingContent && (
               <div className="flex items-start gap-3">
-                <div className="w-8 h-8 rounded-full bg-accent/10 border border-accent/20 flex items-center justify-center text-accent flex-shrink-0">
-                  <Sparkles className="w-4 h-4 text-accent animate-pulse" />
-                </div>
+                {personaImageUrl ? (
+                  <div className="w-8 h-8 rounded-full overflow-hidden border border-border/50 flex-shrink-0">
+                    <img src={personaImageUrl} alt="" className="w-full h-full object-cover" />
+                  </div>
+                ) : (
+                  <div className="w-8 h-8 rounded-full bg-accent/10 border border-accent/20 flex items-center justify-center text-accent flex-shrink-0">
+                    <Sparkles className="w-4 h-4 text-accent animate-pulse" />
+                  </div>
+                )}
                 <div className="flex gap-1 py-3 px-1">
                   <div className="w-1.5 h-1.5 rounded-full bg-text-muted animate-pulse-dots" style={{ animationDelay: '0ms' }} />
                   <div className="w-1.5 h-1.5 rounded-full bg-text-muted animate-pulse-dots" style={{ animationDelay: '200ms' }} />
@@ -481,6 +513,7 @@ interface MessageBubbleProps {
   userMessageId?: string;
   responses?: Message[];
   activeIndex?: number;
+  personaImageUrl?: string | null;
 }
 
 function MessageBubble({
@@ -493,6 +526,7 @@ function MessageBubble({
   userMessageId,
   responses = [],
   activeIndex = 0,
+  personaImageUrl = null,
 }: MessageBubbleProps) {
   const isUser = role === 'USER';
   const { user } = useAuthStore();
@@ -711,9 +745,15 @@ function MessageBubble({
         <div className={`flex items-start w-full ${isUser ? 'justify-end' : ''}`}>
           {/* Left Avatar (Assistant) */}
           {!isUser && (
-            <div className="w-8 h-8 rounded-full bg-accent/10 border border-accent/20 flex items-center justify-center text-accent flex-shrink-0 mr-3">
-              <Sparkles className="w-4 h-4 text-accent" />
-            </div>
+            personaImageUrl ? (
+              <div className="w-8 h-8 rounded-full overflow-hidden border border-border/50 flex-shrink-0 mr-3">
+                <img src={personaImageUrl} alt="" className="w-full h-full object-cover" />
+              </div>
+            ) : (
+              <div className="w-8 h-8 rounded-full bg-accent/10 border border-accent/20 flex items-center justify-center text-accent flex-shrink-0 mr-3">
+                <Sparkles className="w-4 h-4 text-accent" />
+              </div>
+            )
           )}
 
           {isUser ? (

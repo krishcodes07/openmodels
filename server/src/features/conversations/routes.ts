@@ -22,6 +22,14 @@ router.get('/', async (req: Request, res: Response) => {
         providerId: true,
         modelId: true,
         isPinned: true,
+        personaId: true,
+        persona: {
+          select: {
+            id: true,
+            name: true,
+            imageUrl: true,
+          }
+        },
         createdAt: true,
         updatedAt: true,
         _count: { select: { messages: true } },
@@ -48,6 +56,7 @@ router.get('/:id', async (req: Request, res: Response) => {
         messages: {
           orderBy: { createdAt: 'asc' },
         },
+        persona: true,
       },
     });
 
@@ -66,7 +75,7 @@ router.get('/:id', async (req: Request, res: Response) => {
 // POST /api/conversations
 router.post('/', async (req: Request, res: Response) => {
   try {
-    const { title, providerId, modelId } = req.body;
+    const { title, providerId, modelId, personaId } = req.body;
 
     const conversation = await prisma.conversation.create({
       data: {
@@ -74,6 +83,7 @@ router.post('/', async (req: Request, res: Response) => {
         providerId: providerId || 'nvidia',
         modelId: modelId || 'meta/llama-3.3-70b-instruct',
         userId: req.user!.userId,
+        personaId: personaId || null,
       },
     });
 

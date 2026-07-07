@@ -10,6 +10,7 @@ import conversationRoutes from './features/conversations/routes';
 import chatRoutes from './features/chat/routes';
 import providerRoutes from './features/providers/routes';
 import settingsRoutes from './features/settings/routes';
+import personaRoutes from './features/personas/routes';
 
 import path from 'path';
 import fs from 'fs';
@@ -42,14 +43,22 @@ app.use('/api/conversations', conversationRoutes);
 app.use('/api/chat', chatRoutes);
 app.use('/api/providers', providerRoutes);
 app.use('/api/settings', settingsRoutes);
+app.use('/api/personas', personaRoutes);
 
 // Health check
 app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
+import { ChatService } from './features/chat/ChatService';
+
 // Error handler
 app.use(errorHandler);
+
+// Seed personas on startup
+ChatService.seedDefaultPersonas().catch(err => {
+  console.error('[Startup] Failed to seed default personas:', err);
+});
 
 app.listen(config.port, () => {
   console.log(`

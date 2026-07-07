@@ -47,7 +47,7 @@ router.post('/upload', optionalAuthenticate, upload.array('files', 10), (req: Re
 // POST /api/chat
 router.post('/', optionalAuthenticate, async (req: Request, res: Response) => {
   try {
-    const { conversationId, message, providerId, modelId, thinking, webSearch, imageUrls } = req.body;
+    const { conversationId, message, providerId, modelId, thinking, webSearch, imageUrls, personaId } = req.body;
 
     if (!message || !providerId || !modelId) {
       res.status(400).json({ error: 'message, providerId, and modelId are required' });
@@ -97,6 +97,7 @@ router.post('/', optionalAuthenticate, async (req: Request, res: Response) => {
             providerId,
             modelId,
             userId: req.user.userId,
+            personaId: personaId || null,
           },
           include: { messages: true },
         });
@@ -175,9 +176,18 @@ router.post('/', optionalAuthenticate, async (req: Request, res: Response) => {
       sourcesJson = searchResult.sourcesJson;
     }
 
-    // Fetch user settings to get custom system instruction prompt
+    // Resolve system prompt instructions (prioritize active persona systemPrompt)
     let systemPrompt: string | undefined;
-    if (req.user) {
+    const activePersonaId = personaId || conversation?.personaId;
+    if (activePersonaId) {
+      const persona = await prisma.persona.findUnique({
+        where: { id: activePersonaId },
+      });
+      if (persona) {
+        systemPrompt = persona.systemPrompt;
+      }
+    }
+    if (!systemPrompt && req.user) {
       systemPrompt = await ChatService.getSystemPrompt(req.user.userId);
     }
 
@@ -399,8 +409,17 @@ router.post('/regenerate', authenticate, async (req: Request, res: Response) => 
       sourcesJson = searchResult.sourcesJson;
     }
 
-    // Fetch user settings
-    const systemPrompt = await ChatService.getSystemPrompt(req.user!.userId);
+    // Resolve system prompt instructions (prioritize active persona systemPrompt)
+    let systemPrompt: string | undefined;
+    if (conversation.personaId) {
+      const persona = await prisma.persona.findUnique({
+        where: { id: conversation.personaId },
+      });
+      systemPrompt = persona?.systemPrompt;
+    }
+    if (!systemPrompt) {
+      systemPrompt = await ChatService.getSystemPrompt(req.user!.userId);
+    }
 
     const chatMessages: ChatMessage[] = [];
     if (systemPrompt && systemPrompt.trim()) {
@@ -599,8 +618,17 @@ router.post('/edit', authenticate, async (req: Request, res: Response) => {
       sourcesJson = searchResult.sourcesJson;
     }
 
-    // Fetch user settings
-    const systemPrompt = await ChatService.getSystemPrompt(req.user!.userId);
+    // Resolve system prompt instructions (prioritize active persona systemPrompt)
+    let systemPrompt: string | undefined;
+    if (conversation.personaId) {
+      const persona = await prisma.persona.findUnique({
+        where: { id: conversation.personaId },
+      });
+      systemPrompt = persona?.systemPrompt;
+    }
+    if (!systemPrompt) {
+      systemPrompt = await ChatService.getSystemPrompt(req.user!.userId);
+    }
 
     const chatMessages: ChatMessage[] = [];
     if (systemPrompt && systemPrompt.trim()) {

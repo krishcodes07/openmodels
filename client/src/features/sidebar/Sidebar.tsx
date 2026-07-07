@@ -14,6 +14,8 @@ import {
   X,
   PanelLeft,
   Pin,
+  Sparkles,
+  ChevronRight,
 } from 'lucide-react';
 
 export function Sidebar() {
@@ -109,6 +111,19 @@ export function Sidebar() {
           </div>
         ) : (
           <>
+            {conv.persona ? (
+              <div className="w-5 h-5 rounded-full bg-accent/10 border border-accent/25 flex items-center justify-center text-xs flex-shrink-0 overflow-hidden">
+                {conv.persona.imageUrl ? (
+                  <img src={conv.persona.imageUrl} alt="" className="w-full h-full object-cover" />
+                ) : (
+                  <span className="text-[10px] font-bold text-accent">
+                    {conv.persona.name.substring(0, 2).toUpperCase()}
+                  </span>
+                )}
+              </div>
+            ) : (
+              <MessageSquare className="w-4 h-4 text-text-muted/60 flex-shrink-0" />
+            )}
             <span className="flex-1 text-[13px] truncate">{conv.title}</span>
 
             {(hoveredId === conv.id || currentConversation?.id === conv.id) && (
@@ -166,6 +181,20 @@ export function Sidebar() {
           title="New chat"
         >
           <Plus className="w-4 h-4" />
+        </button>
+      </div>
+      
+      {/* Personas Entry Point */}
+      <div className="px-2 mb-2">
+        <button
+          onClick={() => navigate('/personas')}
+          className="w-full flex items-center justify-between px-3 py-2 text-xs font-semibold rounded-lg bg-gradient-to-r from-accent/10 to-purple-500/10 hover:from-accent/15 hover:to-purple-500/15 border border-accent/20 hover:border-accent/30 text-accent transition-all duration-200"
+        >
+          <div className="flex items-center gap-2">
+            <Sparkles className="w-3.5 h-3.5" />
+            <span>Explore Personas</span>
+          </div>
+          <ChevronRight className="w-3 h-3 opacity-60" />
         </button>
       </div>
 
