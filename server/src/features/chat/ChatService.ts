@@ -165,13 +165,17 @@ export class ChatService {
         });
 
         for (const p of defaultPersonas) {
-          const existing = await prisma.persona.findFirst({
+          const existingRecords = await prisma.persona.findMany({
             where: { name: p.name, userId: null },
+            orderBy: { createdAt: 'asc' },
           });
 
-          if (existing) {
+          if (existingRecords.length > 0) {
+            const primary = existingRecords[0];
+
+            // Update primary persona details
             await prisma.persona.update({
-              where: { id: existing.id },
+              where: { id: primary.id },
               data: {
                 description: p.description,
                 systemPrompt: p.systemPrompt,
@@ -179,7 +183,27 @@ export class ChatService {
                 category: p.category || null,
               },
             });
+
+            // If there are duplicate records, clean them up and merge references
+            if (existingRecords.length > 1) {
+              const duplicates = existingRecords.slice(1);
+              const duplicateIds = duplicates.map(d => d.id);
+
+              console.log(`[ChatService] Found ${duplicates.length} duplicates for "${p.name}". Merging and deleting...`);
+
+              // Point any conversations using duplicate persona IDs to the primary one
+              await prisma.conversation.updateMany({
+                where: { personaId: { in: duplicateIds } },
+                data: { personaId: primary.id },
+              });
+
+              // Safely delete the duplicates
+              await prisma.persona.deleteMany({
+                where: { id: { in: duplicateIds } },
+              });
+            }
           } else {
+            // Create the persona if it doesn't exist
             await prisma.persona.create({
               data: {
                 name: p.name,
