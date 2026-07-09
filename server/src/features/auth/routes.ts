@@ -246,7 +246,11 @@ router.get('/me', async (req: Request, res: Response) => {
 
     res.json({ user });
   } catch (error: any) {
-    console.error('[Auth] verify error:', error);
+    if (error?.name === 'TokenExpiredError') {
+      console.warn('[Auth] Access token expired (expected behavior, client will refresh)');
+    } else {
+      console.error('[Auth] verify error:', error);
+    }
     res.status(401).json({ error: 'Invalid token', details: error?.message || 'Unknown error' });
   }
 });
