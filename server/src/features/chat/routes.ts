@@ -111,28 +111,7 @@ router.post('/', optionalAuthenticate, async (req: Request, res: Response) => {
     res.setHeader('Connection', 'keep-alive');
     res.setHeader('X-Conversation-Id', boundConversationId);
 
-    // Generate AI title for new conversations (start early in parallel)
-    let titlePromise: Promise<string> | undefined;
-    const isNew = req.user ? isNewConversation : (!req.body.messages || req.body.messages.length <= 1);
-    if (isNew) {
-      titlePromise = ChatService.generateTitle(providerId, modelId, message, userApiKey).then(async (title) => {
-        try {
-          if (req.user) {
-            await prisma.conversation.update({
-              where: { id: boundConversationId },
-              data: { title },
-            });
-          }
-          if (!res.writableEnded) {
-            res.write(`data: ${JSON.stringify({ type: 'title', title, conversationId: boundConversationId })}\n\n`);
-          }
-          return title;
-        } catch (e) {
-          console.error('[Chat] Failed to update title:', e);
-          return message.substring(0, 60);
-        }
-      });
-    }
+    // We will generate the AI title for new conversations after the response has fully streamed.
 
     // Save user message (only if authenticated)
     if (req.user) {
@@ -298,8 +277,24 @@ router.post('/', optionalAuthenticate, async (req: Request, res: Response) => {
           },
         }).catch(e => console.error('[Chat] Usage log failed:', e));
 
-        if (titlePromise) {
-          await titlePromise.catch(() => {});
+      }
+
+      // Generate AI title for new conversations (after the response is fully generated)
+      const isNew = req.user ? isNewConversation : (!req.body.messages || req.body.messages.length <= 1);
+      if (isNew) {
+        try {
+          const title = await ChatService.generateTitle(providerId, modelId, message, userApiKey);
+          if (req.user) {
+            await prisma.conversation.update({
+              where: { id: boundConversationId },
+              data: { title },
+            });
+          }
+          if (!res.writableEnded) {
+            res.write(`data: ${JSON.stringify({ type: 'title', title, conversationId: boundConversationId })}\n\n`);
+          }
+        } catch (e) {
+          console.error('[Chat] Failed to generate/update title:', e);
         }
       }
 
