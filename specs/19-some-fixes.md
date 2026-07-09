@@ -1,0 +1,12 @@
+## Stop AI Response Feature Bug Fix
+write now when I click on stop AI response button while AI streaming the response it then delets the whole response and only my prompt left there, instead I want to stop the AI stream response and show the response whatever AI has streamed till then in that message, the user can see that message as a normal message (like in chatgpt, gemini etc.)
+
+## Edit Msg feature fix
+Also while AI generating response and I edited my prompt it keeps generating response and start generaing another response for the edited prompt and I can see that when the first response is complete and there will be 1/2 responses and when I go to 2/2 their will be the edited msg response instead I want while AI streams the response and I edited the message it stops streaming there and generate a new response for the edited prompt and and that will be 2/2 response, the first response can be seen by going to 1/2 where the stopped response is seen
+
+## Warning msg fix
+Write now whenever AI generates a response the warning msg "Using server API key — may be rate-limited. Add your own key" will be shown instead I want that msg to be shown for only 1 time in the brower session. If user visit the site again then only it shows the warning msg and make the msg: "Using Server API Key - If response is not generating, please add your own API key in settings"
+
+## Chat Err Fix
+When user choose a model and start chat and if that model thow err like "⚠️ Error generating response: 402 This request requires more credits, or fewer max_tokens. You requested up to 4096 tokens, but can only afford 1481. To increase, visit https://openrouter.ai/settings/credits and upgrade to a paid account" or "429" etc. and user change the model and in that same chat it again send another msg but then AI response ⚠️ API Execution Error: Conversation not found instead of generating response for that msg. fix this, you can ignore that err and not add in chat history and once user refresh it that particular msg will be automatically removed from chat. 
+And if user already chated in a chat and chage model and get the same err, and after he change model and send the AI genrates response sucessfully but when user refresh it he can see the blank prompt he given with no respose, also delete those if response is thrown any err

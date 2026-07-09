@@ -43,5 +43,10 @@ export const createThemeSlice: StateCreator<ChatState, [], [], ThemeSlice> = (se
   toggleThinking: () => set(s => ({ thinkingEnabled: !s.thinkingEnabled })),
   toggleWebSearch: () => set(s => ({ webSearchEnabled: !s.webSearchEnabled })),
   toggleSidebar: () => set(s => ({ isSidebarOpen: !s.isSidebarOpen })),
-  dismissServerKeyWarning: () => set({ usingServerKey: false }),
+  dismissServerKeyWarning: () => {
+    set({ usingServerKey: false });
+    if (typeof window !== 'undefined') {
+      sessionStorage.setItem('dismissedServerKeyWarning', 'true');
+    }
+  },
 });

@@ -219,7 +219,6 @@ export class ChatService {
             });
           }
         }
-        console.log('[ChatService] Default personas seeded/updated successfully.');
       } else {
         console.warn(`[ChatService] Pre-built personas JSON not found at: ${filePath}`);
       }

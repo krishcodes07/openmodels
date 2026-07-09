@@ -62,11 +62,11 @@ ChatService.seedDefaultPersonas().catch(err => {
 
 app.listen(config.port, () => {
   console.log(`
-  ╔═══════════════════════════════════════╗
-  ║     🚀 OpenModels Server Running     ║
-  ║     Port: ${String(config.port).padEnd(26)}║
-  ║     Env:  ${config.nodeEnv.padEnd(26)}║
-  ╚═══════════════════════════════════════╝
+  ╔════════════════════════════════════════════╗
+  ║     OpenModels Server Running              ║
+  ║     Port: ${String(config.port).padEnd(26)}       ║
+  ║     Env:  ${config.nodeEnv.padEnd(26)}       ║
+  ╚════════════════════════════════════════════╝
   `);
 });
 

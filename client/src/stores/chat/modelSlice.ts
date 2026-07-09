@@ -45,10 +45,22 @@ export const createModelSlice: StateCreator<ChatState, [], [], ModelSlice> = (se
   },
 
   selectProvider: async (providerId: string) => {
+    const currentMessages = get().messages;
+    const withoutErrors = currentMessages.filter(m => !m.id.startsWith('error-'));
+    const filteredMessages = withoutErrors.filter((m, idx) => {
+      if (m.role === 'USER') {
+        const nextMsg = withoutErrors[idx + 1];
+        if (!nextMsg || nextMsg.role !== 'ASSISTANT') {
+          return false;
+        }
+      }
+      return true;
+    });
     set({
       selectedProviderId: providerId,
       selectedModelId: '',
       models: [],
+      messages: filteredMessages,
     });
     try {
       const data = await api.getModels(providerId);
@@ -62,6 +74,20 @@ export const createModelSlice: StateCreator<ChatState, [], [], ModelSlice> = (se
   },
 
   selectModel: (modelId: string) => {
-    set({ selectedModelId: modelId });
+    const currentMessages = get().messages;
+    const withoutErrors = currentMessages.filter(m => !m.id.startsWith('error-'));
+    const filteredMessages = withoutErrors.filter((m, idx) => {
+      if (m.role === 'USER') {
+        const nextMsg = withoutErrors[idx + 1];
+        if (!nextMsg || nextMsg.role !== 'ASSISTANT') {
+          return false;
+        }
+      }
+      return true;
+    });
+    set({ 
+      selectedModelId: modelId,
+      messages: filteredMessages,
+    });
   },
 });

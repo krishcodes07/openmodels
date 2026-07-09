@@ -210,6 +210,12 @@ class ApiClient {
       throw new Error(error.error || 'Chat failed');
     }
 
+    // Extract the real conversation ID from the response header immediately
+    const headerConvId = response.headers.get('X-Conversation-Id');
+    if (headerConvId) {
+      onEvent({ type: 'conversationId', conversationId: headerConvId });
+    }
+
     const reader = response.body?.getReader();
     const decoder = new TextDecoder();
 

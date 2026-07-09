@@ -326,6 +326,23 @@ router.post('/', optionalAuthenticate, async (req: Request, res: Response) => {
         }
         return;
       }
+      
+      // Clean up DB: Delete the user message and conversation (if new) on error
+      if (req.user && userMsgId) {
+        try {
+          await prisma.message.delete({
+            where: { id: userMsgId },
+          });
+          if (isNewConversation) {
+            await prisma.conversation.delete({
+              where: { id: boundConversationId },
+            });
+          }
+        } catch (dbErr) {
+          console.warn('[Chat] Failed to clean up user message/conversation on error:', dbErr);
+        }
+      }
+      
       res.write(`data: ${JSON.stringify({ type: 'error', error: error.message })}\n\n`);
     }
 
@@ -551,11 +568,15 @@ router.post('/edit', authenticate, async (req: Request, res: Response) => {
       return;
     }
 
-    // Delete messages created after target user message
+    // Delete messages created after target user message, except assistant responses to this user message
     await prisma.message.deleteMany({
       where: {
         conversationId,
         createdAt: { gt: targetMessage.createdAt },
+        NOT: {
+          role: 'ASSISTANT',
+          parentMessageId: messageId,
+        },
       },
     });
 

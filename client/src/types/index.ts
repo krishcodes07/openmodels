@@ -93,7 +93,7 @@ export interface ApiKeyInfo {
 }
 
 export interface StreamEvent {
-  type: 'content' | 'thinking' | 'done' | 'error' | 'info' | 'sources' | 'regenerated' | 'title';
+  type: 'content' | 'thinking' | 'done' | 'error' | 'info' | 'sources' | 'regenerated' | 'title' | 'conversationId';
   content?: string;
   conversationId?: string;
   error?: string;

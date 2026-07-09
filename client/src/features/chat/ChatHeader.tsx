@@ -269,13 +269,13 @@ export function ChatHeader() {
         <div className="flex items-center justify-between gap-3 px-4 py-2 bg-warning/8 border-b border-warning/15 animate-fade-in">
           <div className="flex items-center gap-2">
             <AlertTriangle className="w-3.5 h-3.5 text-warning flex-shrink-0" />
-            <p className="text-xs text-warning">
-              Using server API key — may be rate-limited.{' '}
+            <p className="text-xs text-warning font-medium">
+              Using Server API Key - If response is not generating, please{' '}
               <button
                 onClick={() => navigate('/settings')}
-                className="underline hover:no-underline font-medium"
+                className="underline hover:no-underline font-semibold cursor-pointer"
               >
-                Add your own key
+                add your own API key in settings
               </button>
             </p>
           </div>

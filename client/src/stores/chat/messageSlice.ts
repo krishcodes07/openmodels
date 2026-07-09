@@ -121,9 +121,34 @@ export const createMessageSlice: StateCreator<ChatState, [], [], MessageSlice> =
     try {
       set({ isLoadingMessages: true });
       const data = await api.getConversation(id);
+      const rawMessages = data.conversation.messages || [];
+
+      // Sanitize: filter out error messages and orphaned user messages
+      // (user messages whose only responses are errors, with no valid assistant response)
+      const sanitizedMessages = rawMessages.filter((msg: any, idx: number) => {
+        // Remove error-style assistant messages
+        if (msg.role === 'ASSISTANT' && msg.content.startsWith('⚠️')) {
+          return false;
+        }
+        // Remove user messages that have no valid assistant response after them
+        if (msg.role === 'USER') {
+          const subsequentMsgs = rawMessages.slice(idx + 1);
+          // Find assistant responses to this user message
+          const hasValidResponse = subsequentMsgs.some((m: any) =>
+            m.role === 'ASSISTANT' && !m.content.startsWith('⚠️') && (m.parentMessageId === msg.id || subsequentMsgs.indexOf(m) === 0)
+          );
+          // If the very next message is an error and there's no valid response, remove this user msg
+          const nextMsg = rawMessages[idx + 1];
+          if (nextMsg && nextMsg.role === 'ASSISTANT' && nextMsg.content.startsWith('⚠️') && !hasValidResponse) {
+            return false;
+          }
+        }
+        return true;
+      });
+
       set({
         currentConversation: data.conversation,
-        messages: data.conversation.messages || [],
+        messages: sanitizedMessages,
         selectedProviderId: data.conversation.providerId,
         selectedModelId: data.conversation.modelId,
         isLoadingMessages: false,
@@ -367,7 +392,7 @@ export const createMessageSlice: StateCreator<ChatState, [], [], MessageSlice> =
               thinkingContents: nextThinkings,
               streamingSources: nextSourcesDict,
               ...(isStillViewing ? {
-                ...(event.type === 'info' && event.usingServerKey ? { usingServerKey: true } : {}),
+                ...(event.type === 'info' && event.usingServerKey && !sessionStorage.getItem('dismissedServerKeyWarning') ? { usingServerKey: true } : {}),
                 ...(event.type === 'sources' ? { activeSources: event.sources } : {}),
                 ...(event.type === 'content' ? { streamingContent: nextContent } : {}),
                 ...(event.type === 'thinking' ? { thinkingContent: nextThinking } : {}),
@@ -480,6 +505,15 @@ export const createMessageSlice: StateCreator<ChatState, [], [], MessageSlice> =
           controller.signal
         );
       } catch (err: any) {
+        const currentActive = get().activeStreams[boundConversationId];
+        if (currentActive && currentActive !== controller) {
+          return;
+        }
+
+        if (err.name === 'AbortError') {
+          return;
+        }
+
         const currentStreams = get().activeStreams;
         const nextStreams = { ...currentStreams };
         delete nextStreams[boundConversationId];
@@ -497,14 +531,6 @@ export const createMessageSlice: StateCreator<ChatState, [], [], MessageSlice> =
           thinkingContents: cleanedThinkings,
           streamingSources: cleanedSources,
         });
-
-        if (err.name === 'AbortError') {
-          const current = get();
-          if (current.currentConversation?.id === boundConversationId) {
-            get().loadConversation(boundConversationId);
-          }
-          return;
-        }
 
         const current = get();
         const targetHistory = current.anonymousMessages[boundConversationId] || [];
@@ -682,7 +708,21 @@ export const createMessageSlice: StateCreator<ChatState, [], [], MessageSlice> =
             return;
           }
 
-          if (event.type === 'info' && event.usingServerKey) {
+          if (event.type === 'conversationId' && event.conversationId) {
+            // Immediately update the pending conversation ID to the real server ID
+            const realId = event.conversationId;
+            const pendingId = tempConversation?.id;
+            if (pendingId && realId !== pendingId) {
+              set({
+                currentConversation: current.currentConversation
+                  ? { ...current.currentConversation, id: realId }
+                  : null,
+                conversations: current.conversations.map(c =>
+                  c.id === pendingId ? { ...c, id: realId } : c
+                ),
+              });
+            }
+          } else if (event.type === 'info' && event.usingServerKey && !sessionStorage.getItem('dismissedServerKeyWarning')) {
             set({ usingServerKey: true });
           } else if (event.type === 'sources') {
             set({ activeSources: event.sources });
@@ -722,6 +762,7 @@ export const createMessageSlice: StateCreator<ChatState, [], [], MessageSlice> =
               streamingContents: cleanedContents,
               thinkingContents: cleanedThinkings,
               streamingSources: cleanedSources,
+              regeneratingMessageId: null,
             });
 
             api.getConversation(finalConvId)
@@ -732,6 +773,7 @@ export const createMessageSlice: StateCreator<ChatState, [], [], MessageSlice> =
                   streamingContent: '',
                   thinkingContent: '',
                   currentConversation: data.conversation,
+                  regeneratingMessageId: null,
                   conversations: get().conversations.map(c =>
                     c.id === tempConversation?.id || c.id === finalConvId
                       ? {
@@ -802,6 +844,11 @@ export const createMessageSlice: StateCreator<ChatState, [], [], MessageSlice> =
       const current = get();
       const activeId = current.currentConversation?.id || streamKey;
 
+      const currentActive = get().activeStreams[activeId];
+      if (currentActive && currentActive !== controller) {
+        return;
+      }
+
       const currentStreams = get().activeStreams;
       const nextStreams = { ...currentStreams };
       delete nextStreams[activeId];
@@ -821,15 +868,19 @@ export const createMessageSlice: StateCreator<ChatState, [], [], MessageSlice> =
       });
 
       if (error.name === 'AbortError') {
-        const isStillViewing = (
+        // Don't call loadConversation here — stopResponse and editMessage
+        // handle their own state after aborting. Calling loadConversation
+        // would overwrite the new stream's state set up by editMessage.
+        const isCurrent = (
           (originConversationId && current.currentConversation?.id === originConversationId) ||
           (!originConversationId && (current.currentConversation?.id === tempConversation.id || current.currentConversation?.id === activeId))
         );
-        if (isStillViewing) {
-          const finalConvId = current.currentConversation?.id || activeId;
-          setTimeout(() => {
-            get().loadConversation(finalConvId);
-          }, 300);
+        if (isCurrent) {
+          set({
+            isStreaming: false,
+            streamingContent: '',
+            thinkingContent: '',
+          });
         }
         return;
       }
@@ -863,6 +914,12 @@ export const createMessageSlice: StateCreator<ChatState, [], [], MessageSlice> =
     const state = get();
     const originConversationId = state.currentConversation?.id;
     if (!originConversationId) return;
+
+    // Abort any active stream for this conversation before starting regeneration
+    const existingController = state.activeStreams[originConversationId];
+    if (existingController) {
+      existingController.abort();
+    }
 
     const originProviderId = state.selectedProviderId;
     const originModelId = state.selectedModelId;
@@ -902,6 +959,9 @@ export const createMessageSlice: StateCreator<ChatState, [], [], MessageSlice> =
         regeneratingMessageId: messageId,
         activeStreams: nextStreams,
         regeneratingMessageIds: nextRegens,
+        streamingContents: { ...state.streamingContents, [originConversationId]: '' },
+        thinkingContents: { ...state.thinkingContents, [originConversationId]: '' },
+        streamingSources: { ...state.streamingSources, [originConversationId]: null },
       });
 
       try {
@@ -944,7 +1004,7 @@ export const createMessageSlice: StateCreator<ChatState, [], [], MessageSlice> =
               thinkingContents: { ...current.thinkingContents, [originConversationId]: nextThinking },
               streamingSources: { ...current.streamingSources, [originConversationId]: nextSources },
               ...(isStillViewing ? {
-                ...(event.type === 'info' && event.usingServerKey ? { usingServerKey: true } : {}),
+                ...(event.type === 'info' && event.usingServerKey && !sessionStorage.getItem('dismissedServerKeyWarning') ? { usingServerKey: true } : {}),
                 ...(event.type === 'sources' ? { activeSources: event.sources } : {}),
                 ...(event.type === 'content' ? { streamingContent: nextContent } : {}),
                 ...(event.type === 'thinking' ? { thinkingContent: nextThinking } : {}),
@@ -1093,6 +1153,9 @@ export const createMessageSlice: StateCreator<ChatState, [], [], MessageSlice> =
       regeneratingMessageId: messageId,
       activeStreams: nextStreams,
       regeneratingMessageIds: nextRegens,
+      streamingContents: { ...state.streamingContents, [originConversationId]: '' },
+      thinkingContents: { ...state.thinkingContents, [originConversationId]: '' },
+      streamingSources: { ...state.streamingSources, [originConversationId]: null },
     });
 
     try {
@@ -1256,6 +1319,11 @@ export const createMessageSlice: StateCreator<ChatState, [], [], MessageSlice> =
         controller.signal
       );
     } catch (error: any) {
+      const currentActive = get().activeStreams[originConversationId];
+      if (currentActive && currentActive !== controller) {
+        return;
+      }
+
       const currentStreams = get().activeStreams;
       const nextStreams = { ...currentStreams };
       delete nextStreams[originConversationId];
@@ -1281,9 +1349,12 @@ export const createMessageSlice: StateCreator<ChatState, [], [], MessageSlice> =
       if (error.name === 'AbortError') {
         const current = get();
         if (current.currentConversation?.id === originConversationId) {
-          setTimeout(() => {
-            get().loadConversation(originConversationId);
-          }, 300);
+          set({
+            isStreaming: false,
+            streamingContent: '',
+            thinkingContent: '',
+            regeneratingMessageId: null,
+          });
         }
         return;
       }
@@ -1305,6 +1376,12 @@ export const createMessageSlice: StateCreator<ChatState, [], [], MessageSlice> =
     const state = get();
     const originConversationId = state.currentConversation?.id;
     if (!originConversationId) return;
+
+    // Abort any active stream for this conversation before starting the edit
+    const existingController = state.activeStreams[originConversationId];
+    if (existingController) {
+      existingController.abort();
+    }
 
     const originProviderId = state.selectedProviderId;
     const originModelId = state.selectedModelId;
@@ -1363,6 +1440,10 @@ export const createMessageSlice: StateCreator<ChatState, [], [], MessageSlice> =
         thinkingContent: '',
         activeSources: null,
         activeStreams: nextStreams,
+        regeneratingMessageId: messageId,
+        streamingContents: { ...state.streamingContents, [originConversationId]: '' },
+        thinkingContents: { ...state.thinkingContents, [originConversationId]: '' },
+        streamingSources: { ...state.streamingSources, [originConversationId]: null },
       });
 
       try {
@@ -1405,7 +1486,7 @@ export const createMessageSlice: StateCreator<ChatState, [], [], MessageSlice> =
               thinkingContents: { ...current.thinkingContents, [originConversationId]: nextThinking },
               streamingSources: { ...current.streamingSources, [originConversationId]: nextSources },
               ...(isStillViewing ? {
-                ...(event.type === 'info' && event.usingServerKey ? { usingServerKey: true } : {}),
+                ...(event.type === 'info' && event.usingServerKey && !sessionStorage.getItem('dismissedServerKeyWarning') ? { usingServerKey: true } : {}),
                 ...(event.type === 'sources' ? { activeSources: event.sources } : {}),
                 ...(event.type === 'content' ? { streamingContent: nextContent } : {}),
                 ...(event.type === 'thinking' ? { thinkingContent: nextThinking } : {}),
@@ -1453,6 +1534,7 @@ export const createMessageSlice: StateCreator<ChatState, [], [], MessageSlice> =
                   isStreaming: false,
                   streamingContent: '',
                   thinkingContent: '',
+                  regeneratingMessageId: null,
                 } : {})
               });
 
@@ -1498,6 +1580,7 @@ export const createMessageSlice: StateCreator<ChatState, [], [], MessageSlice> =
                   isStreaming: false,
                   streamingContent: '',
                   thinkingContent: '',
+                  regeneratingMessageId: null,
                 } : {})
               });
             }
@@ -1517,6 +1600,10 @@ export const createMessageSlice: StateCreator<ChatState, [], [], MessageSlice> =
       thinkingContent: '',
       activeSources: null,
       activeStreams: nextStreams,
+      regeneratingMessageId: messageId,
+      streamingContents: { ...state.streamingContents, [originConversationId]: '' },
+      thinkingContents: { ...state.thinkingContents, [originConversationId]: '' },
+      streamingSources: { ...state.streamingSources, [originConversationId]: null },
     });
 
     try {
@@ -1611,6 +1698,7 @@ export const createMessageSlice: StateCreator<ChatState, [], [], MessageSlice> =
                   streamingContent: '',
                   thinkingContent: '',
                   currentConversation: data.conversation,
+                  regeneratingMessageId: null,
                 });
               })
               .catch((err) => {
@@ -1634,6 +1722,7 @@ export const createMessageSlice: StateCreator<ChatState, [], [], MessageSlice> =
               isStreaming: false,
               streamingContent: '',
               thinkingContent: '',
+              regeneratingMessageId: null,
               activeStreams: nextStreams,
               streamingContents: cleanedContents,
               thinkingContents: cleanedThinkings,
@@ -1645,12 +1734,17 @@ export const createMessageSlice: StateCreator<ChatState, [], [], MessageSlice> =
         controller.signal
       );
     } catch (error: any) {
+      const currentActive = get().activeStreams[originConversationId];
+      if (currentActive && currentActive !== controller) {
+        return;
+      }
       const current = get();
       if (current.currentConversation?.id === originConversationId) {
         set({
           isStreaming: false,
           streamingContent: '',
           thinkingContent: '',
+          regeneratingMessageId: null,
         });
       }
       console.error('Edit error:', error);
@@ -1658,19 +1752,96 @@ export const createMessageSlice: StateCreator<ChatState, [], [], MessageSlice> =
   },
 
   stopResponse: (conversationId: string) => {
-    const { activeStreams, currentConversation } = get();
+    const { activeStreams, currentConversation, streamingContent, thinkingContent, messages } = get();
     const controller = activeStreams[conversationId];
     if (controller) {
       controller.abort();
       
       const nextStreams = { ...activeStreams };
       delete nextStreams[conversationId];
+
+      const cleanedContents = { ...get().streamingContents };
+      delete cleanedContents[conversationId];
+      const cleanedThinkings = { ...get().thinkingContents };
+      delete cleanedThinkings[conversationId];
+      const cleanedSources = { ...get().streamingSources };
+      delete cleanedSources[conversationId];
+      const cleanedRegens = { ...get().regeneratingMessageIds };
+      delete cleanedRegens[conversationId];
       
       const isCurrent = currentConversation?.id === conversationId;
-      set({
-        activeStreams: nextStreams,
-        ...(isCurrent ? { isStreaming: false } : {}),
-      });
+      const isAuthenticated = useAuthStore.getState().isAuthenticated;
+
+      if (isCurrent && streamingContent && streamingContent.trim()) {
+        // Persist the partial content as a finalized assistant message
+        const partialMsg: Message = {
+          id: `msg-stopped-${Date.now()}`,
+          conversationId,
+          role: 'ASSISTANT',
+          content: streamingContent,
+          thinkingContent: thinkingContent || null,
+          createdAt: new Date().toISOString(),
+        };
+
+        if (!isAuthenticated) {
+          // Save to anonymous messages in localStorage
+          const currentAnonMsgs = get().anonymousMessages;
+          const convMessages = [...messages, partialMsg];
+          const nextAnonMsgs = { ...currentAnonMsgs, [conversationId]: convMessages };
+          localStorage.setItem('anonymousMessages', JSON.stringify(nextAnonMsgs));
+          set({
+            activeStreams: nextStreams,
+            streamingContents: cleanedContents,
+            thinkingContents: cleanedThinkings,
+            streamingSources: cleanedSources,
+            regeneratingMessageIds: cleanedRegens,
+            anonymousMessages: nextAnonMsgs,
+            messages: convMessages,
+            isStreaming: false,
+            streamingContent: '',
+            thinkingContent: '',
+            regeneratingMessageId: null,
+          });
+        } else {
+          // For authenticated users, show partial immediately, then sync with server
+          set({
+            activeStreams: nextStreams,
+            streamingContents: cleanedContents,
+            thinkingContents: cleanedThinkings,
+            streamingSources: cleanedSources,
+            regeneratingMessageIds: cleanedRegens,
+            messages: [...messages, partialMsg],
+            isStreaming: false,
+            streamingContent: '',
+            thinkingContent: '',
+            regeneratingMessageId: null,
+          });
+          // Server saves partial with "[Response stopped by user]" marker.
+          // Reload conversation after a short delay to sync with server state.
+          setTimeout(() => {
+            get().loadConversation(conversationId);
+          }, 500);
+        }
+      } else {
+        set({
+          activeStreams: nextStreams,
+          streamingContents: cleanedContents,
+          thinkingContents: cleanedThinkings,
+          streamingSources: cleanedSources,
+          regeneratingMessageIds: cleanedRegens,
+          ...(isCurrent ? {
+            isStreaming: false,
+            streamingContent: '',
+            thinkingContent: '',
+            regeneratingMessageId: null,
+          } : {}),
+        });
+        if (isCurrent && isAuthenticated) {
+          setTimeout(() => {
+            get().loadConversation(conversationId);
+          }, 500);
+        }
+      }
     }
   },
 
