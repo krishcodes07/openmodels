@@ -866,6 +866,220 @@ export const createMessageSlice: StateCreator<ChatState, [], [], MessageSlice> =
 
     const originProviderId = state.selectedProviderId;
     const originModelId = state.selectedModelId;
+    const isAuthenticated = useAuthStore.getState().isAuthenticated;
+
+    if (!isAuthenticated) {
+      if (state.anonymousMessageCount >= 5) {
+        set({ showAuthLimitModal: true });
+        return;
+      }
+
+      // Increment anonymousMessageCount
+      const nextMessageCount = state.anonymousMessageCount + 1;
+      localStorage.setItem('anonymousMessageCount', String(nextMessageCount));
+      set({ anonymousMessageCount: nextMessageCount });
+
+      const controller = new AbortController();
+      const nextStreams = { ...state.activeStreams, [originConversationId]: controller };
+      const nextRegens = { ...state.regeneratingMessageIds, [originConversationId]: messageId };
+
+      // Find user message in state
+      const targetUserMsgIndex = state.messages.findIndex(m => m.id === messageId);
+      if (targetUserMsgIndex === -1) return;
+      const targetUserMsg = state.messages[targetUserMsgIndex];
+
+      // Slice messages up to the user message to strip the previous assistant response
+      const historyMessages = state.messages.slice(0, targetUserMsgIndex);
+      const nextMessages = [...historyMessages, targetUserMsg];
+
+      // Clean up downstream messages in the active view
+      set({
+        messages: nextMessages,
+        isStreaming: true,
+        streamingContent: '',
+        thinkingContent: '',
+        activeSources: null,
+        regeneratingMessageId: messageId,
+        activeStreams: nextStreams,
+        regeneratingMessageIds: nextRegens,
+      });
+
+      try {
+        await api.streamChat(
+          {
+            conversationId: originConversationId,
+            message: targetUserMsg.content,
+            providerId: originProviderId,
+            modelId: originModelId,
+            thinking: state.thinkingEnabled,
+            webSearch: state.webSearchEnabled,
+            imageUrls: targetUserMsg.imageUrls,
+            messages: historyMessages.map((m: any) => ({
+              role: m.role.toLowerCase(),
+              content: m.content,
+              imageUrls: m.imageUrls,
+            })),
+          },
+          (event: StreamEvent) => {
+            const current = get();
+            const currentContent = current.streamingContents[originConversationId] || '';
+            const currentThinking = current.thinkingContents[originConversationId] || '';
+            
+            let nextContent = currentContent;
+            let nextThinking = currentThinking;
+            let nextSources = current.streamingSources[originConversationId] || null;
+
+            if (event.type === 'sources') {
+              nextSources = event.sources ?? null;
+            } else if (event.type === 'content') {
+              nextContent = currentContent + (event.content || '');
+            } else if (event.type === 'thinking') {
+              nextThinking = currentThinking + (event.content || '');
+            }
+
+            const isStillViewing = current.currentConversation?.id === originConversationId;
+
+            set({
+              streamingContents: { ...current.streamingContents, [originConversationId]: nextContent },
+              thinkingContents: { ...current.thinkingContents, [originConversationId]: nextThinking },
+              streamingSources: { ...current.streamingSources, [originConversationId]: nextSources },
+              ...(isStillViewing ? {
+                ...(event.type === 'info' && event.usingServerKey ? { usingServerKey: true } : {}),
+                ...(event.type === 'sources' ? { activeSources: event.sources } : {}),
+                ...(event.type === 'content' ? { streamingContent: nextContent } : {}),
+                ...(event.type === 'thinking' ? { thinkingContent: nextThinking } : {}),
+              } : {})
+            });
+
+            if (event.type === 'done') {
+              const assistantMsg: Message = {
+                id: `msg-${Date.now()}`,
+                conversationId: originConversationId,
+                role: 'ASSISTANT',
+                content: nextContent,
+                thinkingContent: nextThinking || null,
+                sources: nextSources ? JSON.stringify(nextSources) : null,
+                createdAt: new Date().toISOString(),
+              };
+
+              // Re-construct the final messages list for the conversation in localStorage
+              const finalMessages = [...nextMessages, assistantMsg];
+              const finalAnonMsgs = {
+                ...current.anonymousMessages,
+                [originConversationId]: finalMessages,
+              };
+              localStorage.setItem('anonymousMessages', JSON.stringify(finalAnonMsgs));
+
+              const currentStreams = get().activeStreams;
+              const nextStreams = { ...currentStreams };
+              delete nextStreams[originConversationId];
+
+              const cleanedContents = { ...get().streamingContents };
+              delete cleanedContents[originConversationId];
+              const cleanedThinkings = { ...get().thinkingContents };
+              delete cleanedThinkings[originConversationId];
+              const cleanedSources = { ...get().streamingSources };
+              delete cleanedSources[originConversationId];
+              const cleanedRegens = { ...get().regeneratingMessageIds };
+              delete cleanedRegens[originConversationId];
+
+              set({
+                anonymousMessages: finalAnonMsgs,
+                activeStreams: nextStreams,
+                streamingContents: cleanedContents,
+                thinkingContents: cleanedThinkings,
+                streamingSources: cleanedSources,
+                regeneratingMessageIds: cleanedRegens,
+                ...(isStillViewing ? {
+                  messages: finalMessages,
+                  isStreaming: false,
+                  streamingContent: '',
+                  thinkingContent: '',
+                  regeneratingMessageId: null,
+                } : {})
+              });
+
+              if (nextMessageCount >= 5) {
+                set({ showAuthLimitModal: true });
+              }
+            } else if (event.type === 'error') {
+              const errorMsg: Message = {
+                id: `error-${Date.now()}`,
+                conversationId: originConversationId,
+                role: 'ASSISTANT',
+                content: `⚠️ **Error generating response:** ${event.error || 'Unknown error occurred.'}`,
+                createdAt: new Date().toISOString(),
+              };
+
+              const finalMessages = [...nextMessages, errorMsg];
+              const finalAnonMsgs = {
+                ...current.anonymousMessages,
+                [originConversationId]: finalMessages,
+              };
+              localStorage.setItem('anonymousMessages', JSON.stringify(finalAnonMsgs));
+
+              const currentStreams = get().activeStreams;
+              const nextStreams = { ...currentStreams };
+              delete nextStreams[originConversationId];
+
+              const cleanedContents = { ...get().streamingContents };
+              delete cleanedContents[originConversationId];
+              const cleanedThinkings = { ...get().thinkingContents };
+              delete cleanedThinkings[originConversationId];
+              const cleanedSources = { ...get().streamingSources };
+              delete cleanedSources[originConversationId];
+              const cleanedRegens = { ...get().regeneratingMessageIds };
+              delete cleanedRegens[originConversationId];
+
+              set({
+                anonymousMessages: finalAnonMsgs,
+                activeStreams: nextStreams,
+                streamingContents: cleanedContents,
+                thinkingContents: cleanedThinkings,
+                streamingSources: cleanedSources,
+                regeneratingMessageIds: cleanedRegens,
+                ...(isStillViewing ? {
+                  messages: finalMessages,
+                  isStreaming: false,
+                  streamingContent: '',
+                  thinkingContent: '',
+                  regeneratingMessageId: null,
+                } : {})
+              });
+            }
+          },
+          controller.signal
+        );
+      } catch (error: any) {
+        const currentStreams = get().activeStreams;
+        const nextStreams = { ...currentStreams };
+        delete nextStreams[originConversationId];
+
+        const cleanedContents = { ...get().streamingContents };
+        delete cleanedContents[originConversationId];
+        const cleanedThinkings = { ...get().thinkingContents };
+        delete cleanedThinkings[originConversationId];
+        const cleanedSources = { ...get().streamingSources };
+        delete cleanedSources[originConversationId];
+        const cleanedRegens = { ...get().regeneratingMessageIds };
+        delete cleanedRegens[originConversationId];
+
+        set({
+          activeStreams: nextStreams,
+          streamingContents: cleanedContents,
+          thinkingContents: cleanedThinkings,
+          streamingSources: cleanedSources,
+          regeneratingMessageIds: cleanedRegens,
+          isStreaming: false,
+          streamingContent: '',
+          thinkingContent: '',
+          regeneratingMessageId: null,
+        });
+
+        console.error('Regeneration error:', error);
+      }
+      return;
+    }
 
     const controller = new AbortController();
     const nextStreams = { ...state.activeStreams, [originConversationId]: controller };
@@ -1109,6 +1323,16 @@ export const createMessageSlice: StateCreator<ChatState, [], [], MessageSlice> =
     const nextMessages = [...state.messages.slice(0, targetMsgIndex), updatedUserMsg];
 
     if (!isAuthenticated) {
+      if (state.anonymousMessageCount >= 5) {
+        set({ showAuthLimitModal: true });
+        return;
+      }
+
+      // Increment anonymousMessageCount
+      const nextMessageCount = state.anonymousMessageCount + 1;
+      localStorage.setItem('anonymousMessageCount', String(nextMessageCount));
+      set({ anonymousMessageCount: nextMessageCount });
+
       const nextAnonConvs = state.anonymousConversations.map(c =>
         c.id === originConversationId ? { ...c, updatedAt: new Date().toISOString() } : c
       );
@@ -1231,6 +1455,10 @@ export const createMessageSlice: StateCreator<ChatState, [], [], MessageSlice> =
                   thinkingContent: '',
                 } : {})
               });
+
+              if (nextMessageCount >= 5) {
+                set({ showAuthLimitModal: true });
+              }
             } else if (event.type === 'error') {
               const assistantMsg: Message = {
                 id: `error-${Date.now()}`,

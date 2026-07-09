@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useChatStore } from '../../stores/chatStore';
 import { useAuthStore } from '../../stores/authStore';
@@ -37,6 +37,70 @@ export function Sidebar() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState('');
   const [hoveredId, setHoveredId] = useState<string | null>(null);
+
+  const [width, setWidth] = useState(() => Number(localStorage.getItem('sidebarWidth')) || 256);
+  const [isDragging, setIsDragging] = useState(false);
+  const [isMobile, setIsMobile] = useState(() => window.innerWidth < 768);
+
+  useEffect(() => {
+    const handleResize = () => {
+      setIsMobile(window.innerWidth < 768);
+
+      if (window.innerWidth >= 768) {
+        const activeSandboxOpen = useChatStore.getState().isSandboxOpen && useChatStore.getState().activeSandboxCode !== null;
+        const otherWidth = activeSandboxOpen ? (Number(localStorage.getItem('sandboxWidth')) || Math.min(600, Math.floor(window.innerWidth * 0.5))) : 0;
+        const maxAllowedWidth = Math.max(200, window.innerWidth - otherWidth - 380);
+        if (width > maxAllowedWidth) {
+          const newW = Math.max(200, maxAllowedWidth);
+          setWidth(newW);
+          localStorage.setItem('sidebarWidth', String(newW));
+        }
+      }
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, [width]);
+
+  const handleMouseDown = (e: React.MouseEvent) => {
+    e.preventDefault();
+    setIsDragging(true);
+    const startX = e.clientX;
+    const startWidth = width;
+
+    const handleMouseMove = (moveEvent: MouseEvent) => {
+      const activeSandboxOpen = useChatStore.getState().isSandboxOpen && useChatStore.getState().activeSandboxCode !== null;
+      const otherWidth = activeSandboxOpen ? (Number(localStorage.getItem('sandboxWidth')) || Math.min(600, Math.floor(window.innerWidth * 0.5))) : 0;
+      const maxAllowedWidth = Math.max(200, window.innerWidth - otherWidth - 380);
+      const limitWidth = Math.min(450, maxAllowedWidth);
+
+      const newWidth = startWidth + (moveEvent.clientX - startX);
+      if (newWidth >= 200 && newWidth <= limitWidth) {
+        setWidth(newWidth);
+        localStorage.setItem('sidebarWidth', String(newWidth));
+      } else if (newWidth > limitWidth) {
+        setWidth(limitWidth);
+        localStorage.setItem('sidebarWidth', String(limitWidth));
+      } else if (newWidth < 200) {
+        setWidth(200);
+        localStorage.setItem('sidebarWidth', String(200));
+      }
+    };
+
+    const handleMouseUp = () => {
+      setIsDragging(false);
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+    };
+
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+  };
+
+  const sidebarStyle = !isMobile
+    ? {
+        width: isSidebarOpen ? `${width}px` : '0px',
+      }
+    : undefined;
 
   const filteredConversations = conversations.filter(c =>
     c.title.toLowerCase().includes(searchQuery.toLowerCase())
@@ -162,11 +226,28 @@ export function Sidebar() {
 
   return (
     <aside
-      className={`flex flex-col bg-bg-secondary border-r border-border h-full transition-all duration-200 ease-out
-        fixed z-40 top-0 left-0 md:static shadow-2xl md:shadow-none
-        ${isSidebarOpen ? 'w-64 translate-x-0' : 'w-64 -translate-x-full md:w-0 md:translate-x-0 md:overflow-hidden'}
+      style={sidebarStyle}
+      className={`flex flex-col bg-bg-secondary border-r border-border h-full select-none flex-shrink-0 shadow-2xl md:shadow-none
+        fixed z-40 top-0 left-0 md:relative md:top-auto md:left-auto md:z-0
+        ${isDragging ? 'transition-none' : 'transition-all duration-200 ease-out'}
+        ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0 md:overflow-hidden'}
+        ${isMobile ? (isSidebarOpen ? 'w-64' : 'w-64') : ''}
       `}
     >
+      {/* Drag handle */}
+      {isSidebarOpen && !isMobile && (
+        <div
+          onMouseDown={handleMouseDown}
+          className="absolute top-0 -right-1 w-2 h-full cursor-col-resize z-50 select-none group flex justify-center"
+        >
+          <div className={`w-[2px] h-full transition-colors duration-150 ${isDragging ? 'bg-accent' : 'bg-transparent group-hover:bg-accent/40'}`} />
+        </div>
+      )}
+
+      {/* Full screen resize overlay */}
+      {isDragging && (
+        <div className="fixed inset-0 cursor-col-resize z-[9999] select-none pointer-events-auto" />
+      )}
       {/* Header */}
       <div className="h-12 flex items-center justify-between px-3 flex-shrink-0">
         <button

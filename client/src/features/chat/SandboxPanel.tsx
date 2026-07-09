@@ -1,6 +1,7 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { useChatStore } from '../../stores/chatStore';
 import { X, Code2, Eye, RotateCcw, Copy, Check, Download, RefreshCw } from 'lucide-react';
+import Editor from '@monaco-editor/react';
 
 export function SandboxPanel() {
   const {
@@ -17,7 +18,69 @@ export function SandboxPanel() {
   const [copied, setCopied] = useState(false);
   const [iframeKey, setIframeKey] = useState(0); // Used to force-reload the iframe
 
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const [width, setWidth] = useState(() => Number(localStorage.getItem('sandboxWidth')) || Math.min(600, Math.floor(window.innerWidth * 0.5)));
+  const [isDragging, setIsDragging] = useState(false);
+  const [isMobile, setIsMobile] = useState(() => window.innerWidth < 768);
+
+  useEffect(() => {
+    const handleResize = () => {
+      setIsMobile(window.innerWidth < 768);
+
+      if (window.innerWidth >= 768) {
+        const activeSidebarOpen = useChatStore.getState().isSidebarOpen;
+        const otherWidth = activeSidebarOpen ? (Number(localStorage.getItem('sidebarWidth')) || 256) : 0;
+        const maxAllowedWidth = Math.max(320, window.innerWidth - otherWidth - 380);
+        if (width > maxAllowedWidth) {
+          const newW = Math.max(320, maxAllowedWidth);
+          setWidth(newW);
+          localStorage.setItem('sandboxWidth', String(newW));
+        }
+      }
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, [width]);
+
+  const handleMouseDown = (e: React.MouseEvent) => {
+    e.preventDefault();
+    setIsDragging(true);
+    const startX = e.clientX;
+    const startWidth = width;
+
+    const handleMouseMove = (moveEvent: MouseEvent) => {
+      const activeSidebarOpen = useChatStore.getState().isSidebarOpen;
+      const otherWidth = activeSidebarOpen ? (Number(localStorage.getItem('sidebarWidth')) || 256) : 0;
+      const maxAllowedWidth = Math.max(320, window.innerWidth - otherWidth - 380);
+      const limitWidth = Math.min(Math.floor(window.innerWidth * 0.85), maxAllowedWidth);
+
+      const newWidth = startWidth - (moveEvent.clientX - startX);
+      if (newWidth >= 320 && newWidth <= limitWidth) {
+        setWidth(newWidth);
+        localStorage.setItem('sandboxWidth', String(newWidth));
+      } else if (newWidth > limitWidth) {
+        setWidth(limitWidth);
+        localStorage.setItem('sandboxWidth', String(limitWidth));
+      } else if (newWidth < 320) {
+        setWidth(320);
+        localStorage.setItem('sandboxWidth', String(320));
+      }
+    };
+
+    const handleMouseUp = () => {
+      setIsDragging(false);
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+    };
+
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+  };
+
+  const sandboxStyle = !isMobile
+    ? {
+        width: `${width}px`,
+      }
+    : undefined;
 
   // Auto-switch to preview when a new sandbox is opened
   useEffect(() => {
@@ -154,10 +217,29 @@ export function SandboxPanel() {
     `;
   };
 
-  const lines = activeSandboxCode.split('\n');
-
   return (
-    <aside className="fixed md:static inset-y-0 right-0 z-40 w-full md:w-[50vw] border-l border-border h-full bg-bg-secondary flex flex-col shadow-2xl md:shadow-none relative select-none animate-slide-right">
+    <aside
+      style={sandboxStyle}
+      className={`inset-y-0 right-0 z-40 h-full bg-bg-secondary flex flex-col border-l border-border shadow-2xl md:shadow-none select-none animate-slide-right flex-shrink-0
+        fixed md:relative md:inset-y-auto md:right-auto md:z-0
+        ${isMobile ? 'w-full' : ''}
+        ${isDragging ? 'transition-none' : 'transition-all duration-200 ease-out'}
+      `}
+    >
+      {/* Drag handle */}
+      {!isMobile && (
+        <div
+          onMouseDown={handleMouseDown}
+          className="absolute top-0 -left-1 w-2 h-full cursor-col-resize z-50 select-none group flex justify-center"
+        >
+          <div className={`w-[2px] h-full transition-colors duration-150 ${isDragging ? 'bg-accent' : 'bg-transparent group-hover:bg-accent/40'}`} />
+        </div>
+      )}
+
+      {/* Full screen resize overlay */}
+      {isDragging && (
+        <div className="fixed inset-0 cursor-col-resize z-[9999] select-none pointer-events-auto" />
+      )}
       {/* Sandbox Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-bg-primary h-[57px]">
         <div className="flex items-center gap-2">
@@ -234,23 +316,31 @@ export function SandboxPanel() {
         {/* CODE TAB */}
         {activeTab === 'code' && (
           <div className="w-full h-full flex font-mono text-[13px] bg-[#1e1e1e] text-[#d4d4d4] overflow-hidden select-text">
-            {/* Line Numbers gutter */}
-            <div className="py-4 text-right pr-3 pl-4 text-[#858585] select-none bg-[#1e1e1e] border-r border-[#2d2d2d] w-[50px] overflow-hidden font-mono leading-[21px]">
-              {lines.map((_, i) => (
-                <div key={i}>{i + 1}</div>
-              ))}
-            </div>
-
-            {/* Editable text container */}
-            <textarea
-              ref={textareaRef}
+            <Editor
+              height="100%"
+              width="100%"
+              language={
+                activeSandboxLanguage === 'js' || activeSandboxLanguage === 'javascript'
+                  ? 'javascript'
+                  : activeSandboxLanguage === 'ts' || activeSandboxLanguage === 'typescript'
+                  ? 'typescript'
+                  : activeSandboxLanguage === 'svg'
+                  ? 'xml'
+                  : activeSandboxLanguage || 'html'
+              }
+              theme="vs-dark"
               value={activeSandboxCode}
-              onChange={(e) => updateSandboxCode(e.target.value)}
-              spellCheck={false}
-              autoComplete="off"
-              autoCapitalize="off"
-              className="flex-1 h-full py-4 px-4 bg-transparent outline-none border-none resize-none font-mono text-[13px] leading-[21px] overflow-y-auto text-[#d4d4d4] caret-white whitespace-pre select-text"
-              style={{ tabSize: 2 }}
+              onChange={(value) => updateSandboxCode(value || '')}
+              options={{
+                minimap: { enabled: false },
+                fontSize: 13,
+                lineNumbers: 'on',
+                roundedSelection: false,
+                scrollBeyondLastLine: false,
+                readOnly: false,
+                tabSize: 2,
+                wordWrap: 'on',
+              }}
             />
           </div>
         )}
@@ -262,7 +352,7 @@ export function SandboxPanel() {
               key={iframeKey}
               srcDoc={getIframeSrcDoc(activeSandboxCode, activeSandboxLanguage || 'html')}
               title="Sandbox Interactive Preview"
-              sandbox="allow-scripts allow-same-origin allow-modals"
+              sandbox="allow-scripts allow-modals"
               className="flex-1 border-none w-full bg-white"
             />
             {/* Soft refresh indicator button inside viewport */}

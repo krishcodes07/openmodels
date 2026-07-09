@@ -59,7 +59,7 @@ export function ChatLayout() {
 
       {/* Main Chat Area */}
       <main
-        className="flex-1 flex flex-col min-w-0 transition-all duration-300"
+        className="flex-1 flex flex-col min-w-0 md:min-w-[380px] transition-all duration-300"
         style={{ marginLeft: isSidebarOpen ? '0px' : '0px' }}
       >
         <ChatHeader />
