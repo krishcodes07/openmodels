@@ -10,7 +10,7 @@ In this session, we resolved a series of critical chat streaming race conditions
 
 ### 2. Conversation State Synchronization (Header Extraction)
 - **Behavior**: Fixed "Conversation not found" errors that occurred when trying to send subsequent messages in a new chat.
-- **Implementation**: Modified `streamChat` in `api.ts` to extract the `X-Conversation-Id` header immediately when the HTTP request begins, rather than waiting for the title or done events. Emitted a synthetic `conversationId` event that the Zustand `messageSlice` handles by immediately rewriting temporary pending conversation IDs to permanent database IDs across the active stores.
+- **Implementation**: Modified `streamChat` in `api.ts` to extract the `X-Conversation-Id` header immediately when the HTTP request begins, rather than waiting for the title or done events. Emitted a synthetic `conversationId` event that the Zustand `messageSlice` handles by immediately rewriting temporary pending conversation IDs to permanent database IDs across the active stores. To ensure subsequent stream chunks (which lack `conversationId` attributes) continue to stream, we use a closure variable `streamedConvId` in `sendMessage` to preserve the association between the ongoing stream and the updated database conversation ID.
 
 ### 3. Stream Race Condition Hardening (Superseded Streams)
 - **Behavior**: Fixed the issue where editing a prompt while AI was streaming cancelled the previous stream but prevented the new edited stream's output from showing.
@@ -34,3 +34,4 @@ In this session, we resolved a series of critical chat streaming race conditions
 ## Engineering Takeaways
 - **Async Signal Race Conditions**: Synchronously calling `.abort()` triggers the target `AbortError` block asynchronously (on the microtask queue). If you start a new stream synchronously in the same event loop tick, the old stream's catch block will execute after the new stream has initialized, overwriting its `isStreaming: true` state. Comparing the active controller reference inside the catch block is a robust design pattern to prevent older streams from modifying state.
 - **Header-Level Synchronization**: Don't wait for SSE events to synchronize entity IDs. Extracting response headers as early as possible ensures that state maps are populated before the payload body begins processing.
+- **Stream State Mapping**: When rewriting temporary IDs to permanent database IDs mid-stream, use a local closure tracker to bridge the ID transition across subsequent incoming stream event chunks that do not themselves carry the entity identifier.

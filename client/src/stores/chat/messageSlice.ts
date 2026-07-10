@@ -604,6 +604,8 @@ export const createMessageSlice: StateCreator<ChatState, [], [], MessageSlice> =
       ...(!originConversationId ? { conversations: [tempConversation, ...state.conversations] } : {}),
     });
 
+    let streamedConvId: string | null = null;
+
     try {
       await api.streamChat(
         {
@@ -619,7 +621,11 @@ export const createMessageSlice: StateCreator<ChatState, [], [], MessageSlice> =
         (event: StreamEvent) => {
           const current = get();
 
-          const targetId = event.conversationId;
+          if (event.conversationId) {
+            streamedConvId = event.conversationId;
+          }
+
+          const targetId = event.conversationId || streamedConvId;
           const streamId = targetId || streamKey;
 
           if (targetId && targetId !== streamKey) {
