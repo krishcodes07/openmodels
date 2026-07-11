@@ -48,6 +48,7 @@ export interface Message {
   tokenCount?: number | null;
   parentMessageId?: string | null;
   sources?: string | null;
+  userContent?: string | null;
   createdAt: string;
 }
 

@@ -752,6 +752,12 @@ export const createMessageSlice: StateCreator<ChatState, [], [], MessageSlice> =
           } else if (event.type === 'done') {
             const finalConvId = targetId || originConversationId || '';
             
+            // If a new stream (edit/regenerate) replaced ours, don't clean up
+            const doneStreamOwner = get().activeStreams[finalConvId];
+            if (doneStreamOwner && doneStreamOwner !== controller) {
+              return;
+            }
+
             const currentStreams = get().activeStreams;
             const nextStreams = { ...currentStreams };
             delete nextStreams[finalConvId];
@@ -773,6 +779,11 @@ export const createMessageSlice: StateCreator<ChatState, [], [], MessageSlice> =
 
             api.getConversation(finalConvId)
               .then((data) => {
+                // Re-check: if a new stream started while we were fetching, don't overwrite
+                const currentStreamAfterFetch = get().activeStreams[finalConvId];
+                if (currentStreamAfterFetch) {
+                  return; // A new stream is active, don't overwrite its state
+                }
                 set({
                   messages: data.conversation.messages || [],
                   isStreaming: false,
@@ -792,6 +803,11 @@ export const createMessageSlice: StateCreator<ChatState, [], [], MessageSlice> =
               })
               .catch((err) => {
                 console.error('Failed to sync conversation after stream:', err);
+                // Re-check before setting fallback state
+                const currentStreamAfterFetch = get().activeStreams[finalConvId];
+                if (currentStreamAfterFetch) {
+                  return;
+                }
                 const assistantMsg: Message = {
                   id: `msg-${Date.now()}`,
                   conversationId: finalConvId,
@@ -831,6 +847,15 @@ export const createMessageSlice: StateCreator<ChatState, [], [], MessageSlice> =
               content: `⚠️ **Error generating response:** ${event.error || 'Unknown error occurred.'}`,
               createdAt: new Date().toISOString(),
             };
+
+            // If this was a new conversation (no originConversationId), the server
+            // deleted it on error. Clear currentConversation so the next sendMessage
+            // creates a fresh conversation instead of hitting "Conversation not found".
+            const conversationCleanup = !originConversationId ? {
+              currentConversation: null,
+              conversations: current.conversations.filter(c => c.id !== finalConvId),
+            } : {};
+
             set({
               messages: [...current.messages, errorMsg],
               isStreaming: false,
@@ -840,6 +865,7 @@ export const createMessageSlice: StateCreator<ChatState, [], [], MessageSlice> =
               streamingContents: cleanedContents,
               thinkingContents: cleanedThinkings,
               streamingSources: cleanedSources,
+              ...conversationCleanup,
             });
             console.error('Stream error:', event.error);
           }
@@ -850,11 +876,15 @@ export const createMessageSlice: StateCreator<ChatState, [], [], MessageSlice> =
       const current = get();
       const activeId = current.currentConversation?.id || streamKey;
 
+      // CRITICAL: If a new stream (from editMessage/regenerate) has replaced
+      // ours, bail out immediately WITHOUT cleaning up — the new stream owns
+      // the activeStreams entry and streamingContents now.
       const currentActive = get().activeStreams[activeId];
       if (currentActive && currentActive !== controller) {
         return;
       }
 
+      // Safe to clean up — no new stream has replaced ours.
       const currentStreams = get().activeStreams;
       const nextStreams = { ...currentStreams };
       delete nextStreams[activeId];
@@ -874,9 +904,7 @@ export const createMessageSlice: StateCreator<ChatState, [], [], MessageSlice> =
       });
 
       if (error.name === 'AbortError') {
-        // Don't call loadConversation here — stopResponse and editMessage
-        // handle their own state after aborting. Calling loadConversation
-        // would overwrite the new stream's state set up by editMessage.
+        // stopResponse and editMessage handle their own state after aborting.
         const isCurrent = (
           (originConversationId && current.currentConversation?.id === originConversationId) ||
           (!originConversationId && (current.currentConversation?.id === tempConversation.id || current.currentConversation?.id === activeId))
@@ -905,11 +933,22 @@ export const createMessageSlice: StateCreator<ChatState, [], [], MessageSlice> =
           content: `⚠️ **API Execution Error:** ${error.message || 'Connection lost or server unavailable.'}`,
           createdAt: new Date().toISOString(),
         };
+
+        // If the error is "Conversation not found", the server deleted the
+        // conversation (e.g. after a previous provider error). Reset so the
+        // next message creates a fresh conversation.
+        const isConvGone = error.message && error.message.includes('Conversation not found');
+        const convCleanup = isConvGone ? {
+          currentConversation: null,
+          conversations: current.conversations.filter(c => c.id !== current.currentConversation?.id),
+        } : {};
+
         set({
           messages: [...current.messages, errorMsg],
           isStreaming: false,
           streamingContent: '',
           thinkingContent: '',
+          ...convCleanup,
         });
       }
       console.error('Chat error:', error);
@@ -1403,7 +1442,7 @@ export const createMessageSlice: StateCreator<ChatState, [], [], MessageSlice> =
       ...state.messages[targetMsgIndex],
       content: newContent,
     };
-    const nextMessages = [...state.messages.slice(0, targetMsgIndex), updatedUserMsg];
+    let nextMessages = [...state.messages.slice(0, targetMsgIndex), updatedUserMsg];
 
     if (!isAuthenticated) {
       if (state.anonymousMessageCount >= 5) {
@@ -1599,6 +1638,31 @@ export const createMessageSlice: StateCreator<ChatState, [], [], MessageSlice> =
       return;
     }
 
+    // For temp IDs (message created during streaming, not yet synced), we need
+    // to resolve the real server-side message ID first.
+    let resolvedMessageId = messageId;
+    if (messageId.startsWith('temp-')) {
+      try {
+        const data = await api.getConversation(originConversationId);
+        const serverMessages = data.conversation.messages || [];
+        // Find the last user message — that's the one being edited
+        const lastUserMsg = [...serverMessages].reverse().find((m: any) => m.role === 'USER');
+        if (lastUserMsg) {
+          resolvedMessageId = lastUserMsg.id;
+          // Also update local messages with real IDs from server
+          const updatedMessages = nextMessages.map((m: any) =>
+            m.id === messageId ? { ...m, id: resolvedMessageId } : m
+          );
+          set({ messages: updatedMessages });
+          // Update nextMessages reference for consistency
+          nextMessages = updatedMessages;
+        }
+      } catch (err) {
+        console.warn('[EditMessage] Could not resolve temp message ID:', err);
+        // If we can't resolve the ID, the edit will likely fail on server
+      }
+    }
+
     set({
       messages: nextMessages,
       isStreaming: true,
@@ -1606,7 +1670,7 @@ export const createMessageSlice: StateCreator<ChatState, [], [], MessageSlice> =
       thinkingContent: '',
       activeSources: null,
       activeStreams: nextStreams,
-      regeneratingMessageId: messageId,
+      regeneratingMessageId: resolvedMessageId,
       streamingContents: { ...state.streamingContents, [originConversationId]: '' },
       thinkingContents: { ...state.thinkingContents, [originConversationId]: '' },
       streamingSources: { ...state.streamingSources, [originConversationId]: null },
@@ -1616,7 +1680,7 @@ export const createMessageSlice: StateCreator<ChatState, [], [], MessageSlice> =
       await api.streamEdit(
         {
           conversationId: originConversationId,
-          messageId,
+          messageId: resolvedMessageId,
           content: newContent,
           providerId: originProviderId,
           modelId: originModelId,
@@ -1677,6 +1741,13 @@ export const createMessageSlice: StateCreator<ChatState, [], [], MessageSlice> =
             set({ streamingContent: nextContent });
           } else if (event.type === 'thinking') {
             set({ thinkingContent: nextThinking });
+          } else if (event.type === 'regenerated') {
+            set({
+              activeVersionMap: {
+                ...current.activeVersionMap,
+                [event.parentMessageId]: event.newMessageId,
+              },
+            });
           } else if (event.type === 'done') {
             const currentStreams = get().activeStreams;
             const nextStreams = { ...currentStreams };

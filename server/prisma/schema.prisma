@@ -78,6 +78,7 @@ model Message {
   imageUrls       String[]  // For vision messages
   tokenCount      Int?
   sources         String?   // JSON string of web search sources used
+  userContent     String?   // Stores the user prompt that generated this version
 
   // Regeneration versioning: multiple ASSISTANT responses can share the same parentMessageId
   // (the USER message they respond to). Only the latest is "active".

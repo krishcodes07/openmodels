@@ -137,13 +137,16 @@ export function ChatMessages() {
           const activeResponse = responses[activeResponseIdx] || responses[responses.length - 1];
 
           const isThisMsgRegenerating = isStreaming && regeneratingMessageId === userMsg.id;
+          const displayContent = !isThisMsgRegenerating && activeResponse?.userContent
+            ? activeResponse.userContent
+            : userMsg.content;
 
           return (
             <div key={userMsg.id} className="space-y-4">
               {/* User Prompt */}
               <MessageBubble
                 role="USER"
-                content={userMsg.content}
+                content={displayContent}
                 imageUrls={userMsg.imageUrls}
                 userMessageId={userMsg.id}
               />

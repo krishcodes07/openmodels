@@ -251,6 +251,7 @@ router.post('/', optionalAuthenticate, async (req: Request, res: Response) => {
               thinkingContent: thinkingContent || null,
               sources: sourcesJson || null,
               parentMessageId: userMsgId,
+              userContent: message,
             },
           });
 
@@ -314,6 +315,7 @@ router.post('/', optionalAuthenticate, async (req: Request, res: Response) => {
                 thinkingContent: thinkingContent || null,
                 sources: sourcesJson || null,
                 parentMessageId: userMsgId,
+                userContent: message,
               },
             });
             await prisma.conversation.update({
@@ -486,6 +488,7 @@ router.post('/regenerate', authenticate, async (req: Request, res: Response) => 
             thinkingContent: thinkingContent || null,
             parentMessageId: messageId,
             sources: sourcesJson || null,
+            userContent: targetMessage.content,
           },
         });
 
@@ -523,6 +526,7 @@ router.post('/regenerate', authenticate, async (req: Request, res: Response) => 
                 thinkingContent: thinkingContent || null,
                 parentMessageId: messageId,
                 sources: sourcesJson || null,
+                userContent: targetMessage.content,
               },
             });
           } catch (dbErr) {
@@ -690,7 +694,7 @@ router.post('/edit', authenticate, async (req: Request, res: Response) => {
         userApiKey
       );
 
-      await prisma.message.create({
+      const newMsg = await prisma.message.create({
         data: {
           conversationId,
           role: 'ASSISTANT',
@@ -698,9 +702,11 @@ router.post('/edit', authenticate, async (req: Request, res: Response) => {
           thinkingContent: thinkingContent || null,
           parentMessageId: messageId,
           sources: sourcesJson || null,
+          userContent: content,
         },
       });
 
+      res.write(`data: ${JSON.stringify({ type: 'regenerated', newMessageId: newMsg.id, parentMessageId: messageId })}\n\n`);
       res.write(`data: ${JSON.stringify({ type: 'done', conversationId })}\n\n`);
     } catch (error: any) {
       if (error.message === 'Client disconnected' || res.destroyed || res.writableEnded) {
@@ -714,6 +720,7 @@ router.post('/edit', authenticate, async (req: Request, res: Response) => {
                 thinkingContent: thinkingContent || null,
                 parentMessageId: messageId,
                 sources: sourcesJson || null,
+                userContent: content,
               },
             });
           } catch (dbErr) {

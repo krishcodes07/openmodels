@@ -56,11 +56,18 @@ export const createModelSlice: StateCreator<ChatState, [], [], ModelSlice> = (se
       }
       return true;
     });
+    // If all messages were errors/orphaned, reset the conversation so the next
+    // sendMessage creates a fresh one (avoids "Conversation not found" if the
+    // server deleted it after a provider error).
+    const conversationReset = filteredMessages.length === 0 && currentMessages.length > 0
+      ? { currentConversation: null }
+      : {};
     set({
       selectedProviderId: providerId,
       selectedModelId: '',
       models: [],
       messages: filteredMessages,
+      ...conversationReset,
     });
     try {
       const data = await api.getModels(providerId);
@@ -85,9 +92,16 @@ export const createModelSlice: StateCreator<ChatState, [], [], ModelSlice> = (se
       }
       return true;
     });
+    // If all messages were errors/orphaned, reset the conversation so the next
+    // sendMessage creates a fresh one (avoids "Conversation not found" if the
+    // server deleted it after a provider error).
+    const conversationReset = filteredMessages.length === 0 && currentMessages.length > 0
+      ? { currentConversation: null }
+      : {};
     set({ 
       selectedModelId: modelId,
       messages: filteredMessages,
+      ...conversationReset,
     });
   },
 });
