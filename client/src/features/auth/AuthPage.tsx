@@ -10,6 +10,16 @@ export function AuthPage() {
   
   const [isLogin, setIsLogin] = useState(true);
 
+  const verified = searchParams.get('verified');
+  const errorParam = searchParams.get('error');
+  const accessTokenParam = searchParams.get('accessToken');
+  const refreshTokenParam = searchParams.get('refreshToken');
+  const [successMessage, setSuccessMessage] = useState('');
+  const [resendStatus, setResendStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
+
+  const { login, register, googleLogin, authActionLoading, error } = useAuthStore();
+  const navigate = useNavigate();
+
   useEffect(() => {
     if (mode === 'signup') {
       setIsLogin(false);
@@ -17,6 +27,33 @@ export function AuthPage() {
       setIsLogin(true);
     }
   }, [mode]);
+
+  useEffect(() => {
+    if (verified === 'true') {
+      if (accessTokenParam && refreshTokenParam) {
+        setSuccessMessage('Email verified successfully! Logging you in...');
+        api.setTokens(accessTokenParam, refreshTokenParam);
+        const timer = setTimeout(async () => {
+          await useAuthStore.getState().checkAuth();
+          navigate('/', { replace: true });
+        }, 1500);
+        return () => clearTimeout(timer);
+      } else {
+        setSuccessMessage('Email verified successfully! You can now log in.');
+        setIsLogin(true);
+        navigate('/auth', { replace: true });
+      }
+    } else if (verified === 'false') {
+      if (errorParam === 'expired_token') {
+        setLocalError('The verification link has expired. Please log in to receive a new link.');
+      } else if (errorParam === 'invalid_token') {
+        setLocalError('The verification link is invalid.');
+      } else {
+        setLocalError('Email verification failed. Please try again.');
+      }
+      navigate('/auth', { replace: true });
+    }
+  }, [verified, errorParam, accessTokenParam, refreshTokenParam, navigate]);
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -26,8 +63,22 @@ export function AuthPage() {
   const [googleClientId, setGoogleClientId] = useState<string | null>(null);
   const [isGoogleLoading, setIsGoogleLoading] = useState(true);
 
-  const { login, register, googleLogin, authActionLoading, error } = useAuthStore();
-  const navigate = useNavigate();
+  const handleResendVerification = async () => {
+    if (!email) {
+      setLocalError('Please enter your email address first.');
+      return;
+    }
+    setResendStatus('loading');
+    try {
+      await api.resendVerification(email);
+      setResendStatus('success');
+      setSuccessMessage('A new verification email has been sent!');
+      setLocalError('');
+    } catch (err: any) {
+      setResendStatus('error');
+      setLocalError(err.message || 'Failed to resend verification email');
+    }
+  };
 
   useEffect(() => {
     let isMounted = true;
@@ -165,10 +216,27 @@ export function AuthPage() {
             </button>
           </div>
 
+          {/* Success message */}
+          {successMessage && (
+            <div className="mb-6 p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-sm animate-fade-in text-center font-medium">
+              {successMessage}
+            </div>
+          )}
+
           {/* Error */}
           {(localError || error) && (
             <div className="mb-6 p-3 rounded-lg bg-error/10 border border-error/20 text-error text-sm animate-fade-in">
-              {localError || error}
+              <div>{localError || error}</div>
+              {(localError === 'Email verification required' || error === 'Email verification required') && (
+                <button
+                  type="button"
+                  onClick={handleResendVerification}
+                  disabled={resendStatus === 'loading'}
+                  className="mt-2 text-xs font-semibold text-accent hover:text-accent-hover underline block disabled:opacity-50"
+                >
+                  {resendStatus === 'loading' ? 'Sending...' : 'Resend verification email'}
+                </button>
+              )}
             </div>
           )}
 

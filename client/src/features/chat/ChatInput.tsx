@@ -12,7 +12,7 @@ export function ChatInput() {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const { isAuthenticated } = useAuthStore();
+  const { isAuthenticated, user } = useAuthStore();
   const {
     sendMessage,
     isStreaming,
@@ -27,6 +27,21 @@ export function ChatInput() {
     currentConversation,
     stopResponse,
   } = useChatStore();
+
+  const [resendStatus, setResendStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
+
+  const handleResendVerification = async () => {
+    if (!user?.email) return;
+    setResendStatus('loading');
+    try {
+      await api.resendVerification(user.email);
+      setResendStatus('success');
+      toast.success('Verification email sent!');
+    } catch (err: any) {
+      setResendStatus('error');
+      toast.error(err.message || 'Failed to send verification email');
+    }
+  };
 
   const isLimitReached = !isAuthenticated && anonymousMessageCount >= 5;
 
@@ -240,6 +255,30 @@ export function ChatInput() {
                 className="flex-1 sm:flex-initial px-4 py-2 text-xs font-semibold text-white bg-gradient-to-r from-accent to-purple-500 hover:from-accent-hover hover:to-purple-400 rounded-lg shadow-glow hover:shadow-lg transition-all duration-200"
               >
                 Upgrade Now
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Email verification callout */}
+        {isAuthenticated && user && !user.emailVerified && (
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-3 p-4 bg-amber-500/10 border border-amber-500/15 rounded-2xl mt-3 animate-fade-in">
+            <div className="flex flex-col text-left">
+              <span className="text-sm font-semibold text-amber-400 flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
+                Email Verification Required
+              </span>
+              <span className="text-xs text-text-secondary mt-0.5">
+                You can send up to 5 free messages. Please verify your email to unlock unlimited messaging.
+              </span>
+            </div>
+            <div className="flex items-center gap-2 w-full sm:w-auto">
+              <button
+                onClick={handleResendVerification}
+                disabled={resendStatus === 'loading'}
+                className="w-full sm:w-auto px-4 py-2 text-xs font-semibold text-white bg-amber-600 hover:bg-amber-500 rounded-lg transition-all duration-200 disabled:opacity-50"
+              >
+                {resendStatus === 'loading' ? 'Sending...' : resendStatus === 'success' ? 'Link Sent!' : 'Resend Verification'}
               </button>
             </div>
           </div>

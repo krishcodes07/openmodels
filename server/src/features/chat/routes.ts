@@ -60,6 +60,33 @@ router.post('/', optionalAuthenticate, async (req: Request, res: Response) => {
       return;
     }
 
+    // Check email verification and message limits for authenticated users
+    if (req.user) {
+      const user = await prisma.user.findUnique({
+        where: { id: req.user.userId },
+        select: { emailVerified: true }
+      });
+
+      if (user && !user.emailVerified) {
+        const messageCount = await prisma.message.count({
+          where: {
+            conversation: {
+              userId: req.user.userId,
+            },
+            role: 'USER',
+          },
+        });
+
+        if (messageCount >= 5) {
+          res.status(403).json({
+            error: 'Email verification required. You have used your 5 free messages. Please verify your email to continue.',
+            code: 'EMAIL_UNVERIFIED'
+          });
+          return;
+        }
+      }
+    }
+
     // Get user's API key for this provider if authenticated
     let userApiKey: string | undefined;
     if (req.user) {
@@ -373,6 +400,33 @@ router.post('/regenerate', authenticate, async (req: Request, res: Response) => 
       return;
     }
 
+    // Check email verification and message limits for authenticated users
+    if (req.user) {
+      const user = await prisma.user.findUnique({
+        where: { id: req.user.userId },
+        select: { emailVerified: true }
+      });
+
+      if (user && !user.emailVerified) {
+        const messageCount = await prisma.message.count({
+          where: {
+            conversation: {
+              userId: req.user.userId,
+            },
+            role: 'USER',
+          },
+        });
+
+        if (messageCount >= 5) {
+          res.status(403).json({
+            error: 'Email verification required. You have used your 5 free messages. Please verify your email to continue.',
+            code: 'EMAIL_UNVERIFIED'
+          });
+          return;
+        }
+      }
+    }
+
     // Get user API key
     const userApiKey = await ChatService.getUserApiKey(req.user!.userId, providerId);
 
@@ -595,6 +649,33 @@ router.post('/edit', authenticate, async (req: Request, res: Response) => {
       where: { id: conversationId },
       data: { updatedAt: new Date() },
     });
+
+    // Check email verification and message limits for authenticated users
+    if (req.user) {
+      const user = await prisma.user.findUnique({
+        where: { id: req.user.userId },
+        select: { emailVerified: true }
+      });
+
+      if (user && !user.emailVerified) {
+        const messageCount = await prisma.message.count({
+          where: {
+            conversation: {
+              userId: req.user.userId,
+            },
+            role: 'USER',
+          },
+        });
+
+        if (messageCount >= 5) {
+          res.status(403).json({
+            error: 'Email verification required. You have used your 5 free messages. Please verify your email to continue.',
+            code: 'EMAIL_UNVERIFIED'
+          });
+          return;
+        }
+      }
+    }
 
     // Get user API key
     const userApiKey = await ChatService.getUserApiKey(req.user!.userId, providerId);

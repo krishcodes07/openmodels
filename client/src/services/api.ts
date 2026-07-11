@@ -123,6 +123,13 @@ class ApiClient {
     return this.request<any>('/auth/config');
   }
 
+  resendVerification(email: string) {
+    return this.request<any>('/auth/resend-verification', {
+      method: 'POST',
+      body: JSON.stringify({ email }),
+    });
+  }
+
   // Providers
   getProviders() {
     return this.request<any>('/providers');
