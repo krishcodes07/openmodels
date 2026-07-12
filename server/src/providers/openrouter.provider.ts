@@ -94,6 +94,7 @@ export class OpenRouterProvider extends BaseProvider {
     const choice = response.choices[0];
     return {
       content: choice.message?.content || '',
+      thinkingContent: (choice.message as any)?.reasoning_content || (choice.message as any)?.thinking || undefined,
       tokenCount: response.usage?.total_tokens,
       finishReason: choice.finish_reason || undefined,
     };
@@ -130,8 +131,16 @@ export class OpenRouterProvider extends BaseProvider {
 
     for await (const chunk of stream) {
       const delta = chunk.choices[0]?.delta;
-      if (delta?.content) {
-        onChunk({ content: delta.content, done: false });
+      if (delta) {
+        if (delta.content) {
+          onChunk({ content: delta.content, done: false });
+        }
+        if ((delta as any).reasoning_content) {
+          onChunk({ thinkingContent: (delta as any).reasoning_content, done: false });
+        }
+        if ((delta as any).thinking) {
+          onChunk({ thinkingContent: (delta as any).thinking, done: false });
+        }
       }
     }
 

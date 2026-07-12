@@ -99,13 +99,23 @@ export class NvidiaProvider extends BaseProvider {
           .map((word: string) => word.charAt(0).toUpperCase() + word.slice(1))
           .join(' ') || m.id;
 
+        const idLower = m.id.toLowerCase();
+        const supportsThinking = idLower.includes('r1') || 
+                                 idLower.includes('reasoning') || 
+                                 idLower.includes('think') || 
+                                 idLower.includes('glm-5') || 
+                                 idLower.includes('glm-4.7') || 
+                                 idLower.includes('glm-4.6') || 
+                                 idLower.includes('glm-4.5') || 
+                                 idLower.includes('glm-4');
+
         return {
           id: m.id,
           name,
           description: `NVIDIA NIM model: ${m.id}`,
           capabilities: {
             supportsVision: m.id.includes('vision') || m.id.includes('multimodal') || m.id.includes('vl'),
-            supportsThinking: m.id.includes('r1') || m.id.includes('reasoning') || m.id.includes('think'),
+            supportsThinking,
             supportsWebSearch: false,
             supportsStreaming: true,
           },
@@ -134,17 +144,39 @@ export class NvidiaProvider extends BaseProvider {
       return { role: m.role, content: m.content };
     });
 
-    const response = await client.chat.completions.create({
+    const idLower = request.model.toLowerCase();
+    const modelSupportsThinking = idLower.includes('r1') || 
+                                 idLower.includes('reasoning') || 
+                                 idLower.includes('think') || 
+                                 idLower.includes('glm-5') || 
+                                 idLower.includes('glm-4.7') || 
+                                 idLower.includes('glm-4.6') || 
+                                 idLower.includes('glm-4.5') || 
+                                 idLower.includes('glm-4');
+
+    const completionParams: any = {
       model: request.model,
       messages,
       max_tokens: request.maxTokens || 4096,
       temperature: request.temperature ?? 0.7,
       stream: false,
-    });
+    };
+
+    if (modelSupportsThinking) {
+      completionParams.extra_body = {
+        chat_template_kwargs: {
+          enable_thinking: request.thinking !== false,
+          clear_thinking: false
+        }
+      };
+    }
+
+    const response = await client.chat.completions.create(completionParams);
 
     const choice = response.choices[0];
     return {
       content: choice.message?.content || '',
+      thinkingContent: (choice.message as any)?.reasoning_content || (choice.message as any)?.thinking || undefined,
       tokenCount: response.usage?.total_tokens,
       finishReason: choice.finish_reason || undefined,
     };
@@ -171,18 +203,47 @@ export class NvidiaProvider extends BaseProvider {
       return { role: m.role, content: m.content };
     });
 
-    const stream = await client.chat.completions.create({
+    const idLower = request.model.toLowerCase();
+    const modelSupportsThinking = idLower.includes('r1') || 
+                                 idLower.includes('reasoning') || 
+                                 idLower.includes('think') || 
+                                 idLower.includes('glm-5') || 
+                                 idLower.includes('glm-4.7') || 
+                                 idLower.includes('glm-4.6') || 
+                                 idLower.includes('glm-4.5') || 
+                                 idLower.includes('glm-4');
+
+    const completionParams: any = {
       model: request.model,
       messages,
       max_tokens: request.maxTokens || 8192,
       temperature: request.temperature ?? 0.7,
       stream: true,
-    });
+    };
+
+    if (modelSupportsThinking) {
+      completionParams.extra_body = {
+        chat_template_kwargs: {
+          enable_thinking: request.thinking !== false,
+          clear_thinking: false
+        }
+      };
+    }
+
+    const stream = await client.chat.completions.create(completionParams) as any;
 
     for await (const chunk of stream) {
       const delta = chunk.choices[0]?.delta;
-      if (delta?.content) {
-        onChunk({ content: delta.content, done: false });
+      if (delta) {
+        if (delta.content) {
+          onChunk({ content: delta.content, done: false });
+        }
+        if ((delta as any).reasoning_content) {
+          onChunk({ thinkingContent: (delta as any).reasoning_content, done: false });
+        }
+        if ((delta as any).thinking) {
+          onChunk({ thinkingContent: (delta as any).thinking, done: false });
+        }
       }
     }
 
