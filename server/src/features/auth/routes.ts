@@ -61,10 +61,12 @@ router.post('/register', async (req: Request, res: Response) => {
     });
 
     const clientUrl = req.get('origin') || process.env.CLIENT_URL || 'http://localhost:5173';
-    // Send verification email asynchronously
-    sendVerificationEmail(user.email, verificationToken, clientUrl).catch((err) => {
+    // Send verification email
+    try {
+      await sendVerificationEmail(user.email, verificationToken, clientUrl);
+    } catch (err) {
       console.error('[Auth] Failed to send verification email during registration:', err);
-    });
+    }
 
     const payload: TokenPayload = { userId: user.id, email: user.email };
     const accessToken = generateAccessToken(payload);
@@ -129,9 +131,11 @@ router.post('/login', async (req: Request, res: Response) => {
       }
 
       const clientUrl = req.get('origin') || process.env.CLIENT_URL || 'http://localhost:5173';
-      sendVerificationEmail(user.email, token, clientUrl).catch((err) => {
+      try {
+        await sendVerificationEmail(user.email, token, clientUrl);
+      } catch (err) {
         console.error('[Auth] Failed to resend verification email during login:', err);
-      });
+      }
 
       res.status(403).json({
         error: 'Email verification required',
@@ -309,8 +313,9 @@ router.get('/me', async (req: Request, res: Response) => {
 router.get('/verify', async (req: Request, res: Response) => {
   const protocol = req.secure || req.headers['x-forwarded-proto'] === 'https' ? 'https' : 'http';
   const host = req.get('host');
-  // In production (Vercel), frontend and backend share the same host. In development, fallback to clientUrl.
-  const redirectBase = (process.env.NODE_ENV === 'production' && host)
+  // Check if we are running locally (host contains localhost or 127.0.0.1)
+  const isLocalhost = host && (host.includes('localhost') || host.includes('127.0.0.1'));
+  const redirectBase = (host && !isLocalhost)
     ? `${protocol}://${host}`
     : (process.env.CLIENT_URL || config.clientUrl || 'http://localhost:5173');
 
