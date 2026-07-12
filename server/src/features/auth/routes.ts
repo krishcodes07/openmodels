@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
+import { OAuth2Client } from 'google-auth-library';
 import { prisma } from '../../lib/prisma';
 import { config } from '../../config';
 import { sendVerificationEmail } from '../../lib/mailer';
@@ -13,6 +14,7 @@ import {
 } from '../../lib/jwt';
 
 const router = Router();
+const googleClient = new OAuth2Client(config.google.clientId);
 
 // GET /api/auth/config
 router.get('/config', (_req: Request, res: Response) => {
@@ -175,14 +177,24 @@ router.post('/google', async (req: Request, res: Response) => {
       return;
     }
 
-    // Decode the Google JWT token (in production, verify with Google's public keys)
-    const parts = credential.split('.');
-    if (parts.length !== 3) {
-      res.status(400).json({ error: 'Invalid credential format' });
+    let payload;
+    try {
+      const ticket = await googleClient.verifyIdToken({
+        idToken: credential,
+        audience: config.google.clientId,
+      });
+      payload = ticket.getPayload();
+    } catch (err: any) {
+      console.error('[Auth] Google token verification failed:', err);
+      res.status(401).json({ error: 'Invalid Google token signature or expired' });
       return;
     }
 
-    const payload = JSON.parse(Buffer.from(parts[1], 'base64').toString());
+    if (!payload) {
+      res.status(401).json({ error: 'Failed to verify Google token' });
+      return;
+    }
+
     const { sub: googleId, email, name, picture } = payload;
 
     if (!email) {

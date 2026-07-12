@@ -10,8 +10,17 @@ import path from 'path';
 
 const router = Router();
 
-// Configure multer storage in memory
-const storage = multer.memoryStorage();
+// Configure multer storage on disk
+const storage = multer.diskStorage({
+  destination: (_req, _file, cb) => {
+    cb(null, path.join(__dirname, '../../../uploads'));
+  },
+  filename: (_req, file, cb) => {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
+    const ext = path.extname(file.originalname);
+    cb(null, `${file.fieldname}-${uniqueSuffix}${ext}`);
+  },
+});
 
 const upload = multer({
   storage,
@@ -36,7 +45,8 @@ router.post('/upload', optionalAuthenticate, upload.array('files', 10), (req: Re
       res.status(400).json({ error: 'No files uploaded' });
       return;
     }
-    const urls = files.map(f => `data:${f.mimetype};base64,${f.buffer.toString('base64')}`);
+    // Return relative /uploads/ URLs instead of heavy base64 strings
+    const urls = files.map(f => `/uploads/${f.filename}`);
     res.json({ urls });
   } catch (error: any) {
     console.error('[Upload] Error:', error);
