@@ -307,11 +307,18 @@ router.get('/me', async (req: Request, res: Response) => {
 
 // GET /api/auth/verify - Verification link clicked by user
 router.get('/verify', async (req: Request, res: Response) => {
+  const protocol = req.secure || req.headers['x-forwarded-proto'] === 'https' ? 'https' : 'http';
+  const host = req.get('host');
+  // In production (Vercel), frontend and backend share the same host. In development, fallback to clientUrl.
+  const redirectBase = (process.env.NODE_ENV === 'production' && host)
+    ? `${protocol}://${host}`
+    : (process.env.CLIENT_URL || config.clientUrl || 'http://localhost:5173');
+
   try {
     const { token } = req.query;
 
     if (!token || typeof token !== 'string') {
-      res.redirect(`${config.clientUrl}/auth?verified=false&error=missing_token`);
+      res.redirect(`${redirectBase}/auth?verified=false&error=missing_token`);
       return;
     }
 
@@ -322,12 +329,12 @@ router.get('/verify', async (req: Request, res: Response) => {
     });
 
     if (!user) {
-      res.redirect(`${config.clientUrl}/auth?verified=false&error=invalid_token`);
+      res.redirect(`${redirectBase}/auth?verified=false&error=invalid_token`);
       return;
     }
 
     if (user.verificationTokenExpires && new Date() > user.verificationTokenExpires) {
-      res.redirect(`${config.clientUrl}/auth?verified=false&error=expired_token`);
+      res.redirect(`${redirectBase}/auth?verified=false&error=expired_token`);
       return;
     }
 
@@ -344,10 +351,10 @@ router.get('/verify', async (req: Request, res: Response) => {
     const accessToken = generateAccessToken(payload);
     const refreshToken = generateRefreshToken(payload);
 
-    res.redirect(`${config.clientUrl}/auth?verified=true&accessToken=${accessToken}&refreshToken=${refreshToken}`);
+    res.redirect(`${redirectBase}/auth?verified=true&accessToken=${accessToken}&refreshToken=${refreshToken}`);
   } catch (error) {
     console.error('[Auth] Verification route error:', error);
-    res.redirect(`${config.clientUrl}/auth?verified=false&error=server_error`);
+    res.redirect(`${redirectBase}/auth?verified=false&error=server_error`);
   }
 });
 
