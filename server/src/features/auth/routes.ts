@@ -60,8 +60,9 @@ router.post('/register', async (req: Request, res: Response) => {
       },
     });
 
+    const clientUrl = req.get('origin') || process.env.CLIENT_URL || 'http://localhost:5173';
     // Send verification email asynchronously
-    sendVerificationEmail(user.email, verificationToken).catch((err) => {
+    sendVerificationEmail(user.email, verificationToken, clientUrl).catch((err) => {
       console.error('[Auth] Failed to send verification email during registration:', err);
     });
 
@@ -127,7 +128,8 @@ router.post('/login', async (req: Request, res: Response) => {
         });
       }
 
-      sendVerificationEmail(user.email, token).catch((err) => {
+      const clientUrl = req.get('origin') || process.env.CLIENT_URL || 'http://localhost:5173';
+      sendVerificationEmail(user.email, token, clientUrl).catch((err) => {
         console.error('[Auth] Failed to resend verification email during login:', err);
       });
 
@@ -381,7 +383,8 @@ router.post('/resend-verification', async (req: Request, res: Response) => {
       },
     });
 
-    await sendVerificationEmail(user.email, token);
+    const clientUrl = req.get('origin') || process.env.CLIENT_URL || 'http://localhost:5173';
+    await sendVerificationEmail(user.email, token, clientUrl);
 
     res.json({ message: 'Verification email resent successfully' });
   } catch (error: any) {
