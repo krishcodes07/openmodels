@@ -78,6 +78,32 @@ export class NvidiaProvider extends BaseProvider {
     });
   }
 
+  private supportsThinking(modelId: string): boolean {
+    const idLower = modelId.toLowerCase();
+    return idLower.includes('r1') ||
+           idLower.includes('reasoning') ||
+           idLower.includes('think') ||
+           idLower.includes('glm-5') ||
+           idLower.includes('glm-4') ||
+           idLower.includes('qwq') ||
+           idLower.includes('o1') ||
+           idLower.includes('o3') ||
+           idLower.includes('kimi');
+  }
+
+  private supportsVision(modelId: string): boolean {
+    const idLower = modelId.toLowerCase();
+    return idLower.includes('vision') ||
+           idLower.includes('multimodal') ||
+           idLower.includes('vl') ||
+           idLower.includes('llava') ||
+           idLower.includes('pixtral') ||
+           idLower.includes('molmo') ||
+           idLower.includes('fuyu') ||
+           idLower.includes('paligemma') ||
+           idLower.includes('qwen-vl');
+  }
+
   async listModels(apiKey?: string): Promise<ProviderModel[]> {
     try {
       const key = apiKey || config.providers.nvidia.apiKey;
@@ -99,23 +125,13 @@ export class NvidiaProvider extends BaseProvider {
           .map((word: string) => word.charAt(0).toUpperCase() + word.slice(1))
           .join(' ') || m.id;
 
-        const idLower = m.id.toLowerCase();
-        const supportsThinking = idLower.includes('r1') || 
-                                 idLower.includes('reasoning') || 
-                                 idLower.includes('think') || 
-                                 idLower.includes('glm-5') || 
-                                 idLower.includes('glm-4.7') || 
-                                 idLower.includes('glm-4.6') || 
-                                 idLower.includes('glm-4.5') || 
-                                 idLower.includes('glm-4');
-
         return {
           id: m.id,
           name,
           description: `NVIDIA NIM model: ${m.id}`,
           capabilities: {
-            supportsVision: m.id.includes('vision') || m.id.includes('multimodal') || m.id.includes('vl'),
-            supportsThinking,
+            supportsVision: this.supportsVision(m.id),
+            supportsThinking: this.supportsThinking(m.id),
             supportsWebSearch: false,
             supportsStreaming: true,
           },
@@ -144,15 +160,7 @@ export class NvidiaProvider extends BaseProvider {
       return { role: m.role, content: m.content };
     });
 
-    const idLower = request.model.toLowerCase();
-    const modelSupportsThinking = idLower.includes('r1') || 
-                                 idLower.includes('reasoning') || 
-                                 idLower.includes('think') || 
-                                 idLower.includes('glm-5') || 
-                                 idLower.includes('glm-4.7') || 
-                                 idLower.includes('glm-4.6') || 
-                                 idLower.includes('glm-4.5') || 
-                                 idLower.includes('glm-4');
+    const modelSupportsThinking = this.supportsThinking(request.model);
 
     const completionParams: any = {
       model: request.model,
@@ -203,15 +211,7 @@ export class NvidiaProvider extends BaseProvider {
       return { role: m.role, content: m.content };
     });
 
-    const idLower = request.model.toLowerCase();
-    const modelSupportsThinking = idLower.includes('r1') || 
-                                 idLower.includes('reasoning') || 
-                                 idLower.includes('think') || 
-                                 idLower.includes('glm-5') || 
-                                 idLower.includes('glm-4.7') || 
-                                 idLower.includes('glm-4.6') || 
-                                 idLower.includes('glm-4.5') || 
-                                 idLower.includes('glm-4');
+    const modelSupportsThinking = this.supportsThinking(request.model);
 
     const completionParams: any = {
       model: request.model,
