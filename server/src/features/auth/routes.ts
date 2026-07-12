@@ -213,11 +213,17 @@ router.post('/google', async (req: Request, res: Response) => {
           },
         },
       });
-    } else if (!user.googleId) {
-      // Link Google account to existing email account and mark verified
+    } else {
+      // User exists. Ensure googleId is linked and emailVerified is true.
+      const updates: any = { emailVerified: true };
+      if (!user.googleId) {
+        updates.googleId = googleId;
+        updates.avatar = picture || user.avatar;
+      }
+
       user = await prisma.user.update({
         where: { id: user.id },
-        data: { googleId, avatar: picture || user.avatar, emailVerified: true },
+        data: updates,
       });
     }
 
