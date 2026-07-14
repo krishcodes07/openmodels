@@ -87,6 +87,10 @@ export const config = {
       apiKey: process.env.ZAI_API_KEY || '',
       baseUrl: 'https://api.z.ai/api/paas/v4',
     },
+    agnes: {
+      apiKey: process.env.AGNES_API_KEY || '',
+      baseUrl: 'https://apihub.agnes-ai.com/v1',
+    },
   },
 
   firecrawl: {

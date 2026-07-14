@@ -18,6 +18,7 @@ import { OpenCodeProvider } from './opencode.provider';
 import { CohereProvider } from './cohere.provider';
 import { CloudflareProvider } from './cloudflare.provider';
 import { ZaiProvider } from './zai.provider';
+import { AgnesProvider } from './agnes.provider';
 
 class ProviderRegistry {
   private providers = new Map<string, BaseProvider>();
@@ -62,4 +63,5 @@ providerRegistry.register(new OpenCodeProvider());
 providerRegistry.register(new CohereProvider());
 providerRegistry.register(new CloudflareProvider());
 providerRegistry.register(new ZaiProvider());
+providerRegistry.register(new AgnesProvider());
 
