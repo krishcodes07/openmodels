@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState, useMemo } from 'react';
 import { useChatStore } from '../../stores/chatStore';
-import { useAuthStore } from '../../stores/authStore';
-import { Brain, Sparkles, ChevronUp, ChevronDown, Copy, Check, RefreshCw, ChevronLeft, ChevronRight, Globe, Play, Pencil } from 'lucide-react';
+import { Brain, ChevronUp, ChevronDown, Copy, Check, RefreshCw, ChevronLeft, ChevronRight, Globe, Play, Pencil } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { Message } from '../../types';
@@ -166,21 +165,10 @@ export function ChatMessages() {
                       personaImageUrl={personaImageUrl}
                     />
                   ) : !thinkingContent && (
-                    <div className="flex items-start gap-3">
-                      {personaImageUrl ? (
-                        <div className="w-8 h-8 rounded-full overflow-hidden border border-border/50 flex-shrink-0">
-                          <img src={personaImageUrl} alt="" className="w-full h-full object-cover" />
-                        </div>
-                      ) : (
-                        <div className="w-8 h-8 rounded-full bg-accent/10 border border-accent/20 flex items-center justify-center text-accent flex-shrink-0">
-                          <Sparkles className="w-4 h-4 text-accent animate-pulse" />
-                        </div>
-                      )}
-                      <div className="flex gap-1 py-3 px-1">
-                        <div className="w-1.5 h-1.5 rounded-full bg-text-muted animate-pulse-dots" style={{ animationDelay: '0ms' }} />
-                        <div className="w-1.5 h-1.5 rounded-full bg-text-muted animate-pulse-dots" style={{ animationDelay: '200ms' }} />
-                        <div className="w-1.5 h-1.5 rounded-full bg-text-muted animate-pulse-dots" style={{ animationDelay: '400ms' }} />
-                      </div>
+                    <div className="flex gap-1 py-3 px-1">
+                      <div className="w-1.5 h-1.5 rounded-full bg-text-muted animate-pulse-dots" style={{ animationDelay: '0ms' }} />
+                      <div className="w-1.5 h-1.5 rounded-full bg-text-muted animate-pulse-dots" style={{ animationDelay: '200ms' }} />
+                      <div className="w-1.5 h-1.5 rounded-full bg-text-muted animate-pulse-dots" style={{ animationDelay: '400ms' }} />
                     </div>
                   )}
                 </div>
@@ -215,21 +203,10 @@ export function ChatMessages() {
                 personaImageUrl={personaImageUrl}
               />
             ) : !thinkingContent && (
-              <div className="flex items-start gap-3">
-                {personaImageUrl ? (
-                  <div className="w-8 h-8 rounded-full overflow-hidden border border-border/50 flex-shrink-0">
-                    <img src={personaImageUrl} alt="" className="w-full h-full object-cover" />
-                  </div>
-                ) : (
-                  <div className="w-8 h-8 rounded-full bg-accent/10 border border-accent/20 flex items-center justify-center text-accent flex-shrink-0">
-                    <Sparkles className="w-4 h-4 text-accent animate-pulse" />
-                  </div>
-                )}
-                <div className="flex gap-1 py-3 px-1">
-                  <div className="w-1.5 h-1.5 rounded-full bg-text-muted animate-pulse-dots" style={{ animationDelay: '0ms' }} />
-                  <div className="w-1.5 h-1.5 rounded-full bg-text-muted animate-pulse-dots" style={{ animationDelay: '200ms' }} />
-                  <div className="w-1.5 h-1.5 rounded-full bg-text-muted animate-pulse-dots" style={{ animationDelay: '400ms' }} />
-                </div>
+              <div className="flex gap-1 py-3 px-1">
+                <div className="w-1.5 h-1.5 rounded-full bg-text-muted animate-pulse-dots" style={{ animationDelay: '0ms' }} />
+                <div className="w-1.5 h-1.5 rounded-full bg-text-muted animate-pulse-dots" style={{ animationDelay: '200ms' }} />
+                <div className="w-1.5 h-1.5 rounded-full bg-text-muted animate-pulse-dots" style={{ animationDelay: '400ms' }} />
               </div>
             )}
           </div>
@@ -529,10 +506,9 @@ function MessageBubble({
   userMessageId,
   responses = [],
   activeIndex = 0,
-  personaImageUrl = null,
+  personaImageUrl: _personaImageUrl = null,
 }: MessageBubbleProps) {
   const isUser = role === 'USER';
-  const { user } = useAuthStore();
   const { editMessage, regenerateResponse, setVersion, setSourcesOpen, activeSources, isSourcesOpen } = useChatStore();
 
   const [copied, setCopied] = useState(false);
@@ -732,32 +708,18 @@ function MessageBubble({
       {/* 1. Thought Process (SSE thinkingContent or parsed inlineThinking) */}
       {(thinkingContent || inlineThinking) && (
         <div className="flex items-start">
-          {!isUser && <div className="w-8 flex-shrink-0 mr-3" />}
           <div className="flex-1 min-w-0">
             <ThinkingBlock
               content={thinkingContent || inlineThinking || ''}
               isThinking={isStreaming && !cleanContent}
             />
           </div>
-          {isUser && <div className="w-8 flex-shrink-0 ml-3" />}
         </div>
       )}
 
       {/* 2. Message Body */}
       {(!isStreaming || cleanContent) && (
         <div className={`flex items-start w-full ${isUser ? 'justify-end' : ''}`}>
-          {/* Left Avatar (Assistant) */}
-          {!isUser && (
-            personaImageUrl ? (
-              <div className="w-8 h-8 rounded-full overflow-hidden border border-border/50 flex-shrink-0 mr-3">
-                <img src={personaImageUrl} alt="" className="w-full h-full object-cover" />
-              </div>
-            ) : (
-              <div className="w-8 h-8 rounded-full bg-accent/10 border border-accent/20 flex items-center justify-center text-accent flex-shrink-0 mr-3">
-                <Sparkles className="w-4 h-4 text-accent" />
-              </div>
-            )
-          )}
 
           {isUser ? (
             <div className={`flex flex-col items-end gap-1.5 group/userMsg ${isEditing ? 'w-[70%] md:w-full' : 'max-w-[80%]'}`}>
@@ -945,18 +907,7 @@ function MessageBubble({
             </div>
           )}
 
-          {/* Right Avatar (User) */}
-          {isUser && (
-            <div className="w-8 h-8 rounded-full bg-bg-secondary border border-border flex items-center justify-center flex-shrink-0 ml-3 overflow-hidden">
-              {user?.avatar ? (
-                <img src={user.avatar} alt="" className="w-full h-full object-cover" />
-              ) : (
-                <span className="text-xs font-semibold text-text-secondary">
-                  {user?.name?.charAt(0) || user?.email?.charAt(0) || '?'}
-                </span>
-              )}
-            </div>
-          )}
+
         </div>
       )}
     </div>

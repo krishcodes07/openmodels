@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, useNavigate } from 'react-router-dom';
 import { useChatStore } from '../../stores/chatStore';
 import { Sidebar } from '../sidebar/Sidebar';
 import { ChatHeader } from './ChatHeader';
@@ -13,6 +13,7 @@ import { AuthLimitModal } from './AuthLimitModal';
 
 export function ChatLayout() {
   const { conversationId } = useParams();
+  const navigate = useNavigate();
   const {
     fetchProviders,
     fetchModels,
@@ -41,6 +42,26 @@ export function ChatLayout() {
       loadConversation(conversationId);
     }
   }, [conversationId]);
+
+  // Update document title based on the active conversation
+  useEffect(() => {
+    if (currentConversation?.title) {
+      document.title = currentConversation.title;
+    } else {
+      document.title = 'OpenModels';
+    }
+  }, [currentConversation?.title]);
+
+  // Navigate to /chat/:id when a new conversation is created
+  useEffect(() => {
+    if (
+      currentConversation?.id &&
+      !currentConversation.id.startsWith('pending-') &&
+      conversationId !== currentConversation.id
+    ) {
+      navigate(`/chat/${currentConversation.id}`);
+    }
+  }, [currentConversation?.id, conversationId, navigate]);
 
   const hasMessages = messages.length > 0 || currentConversation;
 
