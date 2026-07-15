@@ -7,6 +7,7 @@ export interface ChatState {
   messages: Message[];
   providers: Provider[];
   models: Model[];
+  modelsCache: Record<string, Model[]>;
 
   // Anonymous state
   anonymousConversations: Conversation[];

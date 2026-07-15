@@ -6,6 +6,7 @@ import type { Model } from '../../types';
 export interface ModelSlice {
   providers: any[];
   models: Model[];
+  modelsCache: Record<string, Model[]>;
   selectedProviderId: string;
   selectedModelId: string;
   fetchProviders: () => Promise<void>;
@@ -17,6 +18,7 @@ export interface ModelSlice {
 export const createModelSlice: StateCreator<ChatState, [], [], ModelSlice> = (set, get) => ({
   providers: [],
   models: [],
+  modelsCache: {},
   selectedProviderId: 'mistral',
   selectedModelId: 'mistral-medium-2505',
 
@@ -30,9 +32,26 @@ export const createModelSlice: StateCreator<ChatState, [], [], ModelSlice> = (se
   },
 
   fetchModels: async (providerId: string) => {
+    const cache = get().modelsCache || {};
+    if (cache[providerId]) {
+      set({ models: cache[providerId] });
+      const state = get();
+      const modelExists = cache[providerId].some((m: Model) => m.id === state.selectedModelId);
+      if (!modelExists && cache[providerId].length > 0) {
+        set({ selectedModelId: cache[providerId][0].id });
+      }
+      return;
+    }
+
     try {
       const data = await api.getModels(providerId);
-      set({ models: data.models });
+      set({
+        models: data.models,
+        modelsCache: {
+          ...cache,
+          [providerId]: data.models,
+        },
+      });
       // Auto-select first model if current model not in list
       const state = get();
       const modelExists = data.models.some((m: Model) => m.id === state.selectedModelId);
@@ -62,6 +81,19 @@ export const createModelSlice: StateCreator<ChatState, [], [], ModelSlice> = (se
     const conversationReset = filteredMessages.length === 0 && currentMessages.length > 0
       ? { currentConversation: null }
       : {};
+
+    const cache = get().modelsCache || {};
+    if (cache[providerId]) {
+      set({
+        selectedProviderId: providerId,
+        selectedModelId: cache[providerId].length > 0 ? cache[providerId][0].id : '',
+        models: cache[providerId],
+        messages: filteredMessages,
+        ...conversationReset,
+      });
+      return;
+    }
+
     set({
       selectedProviderId: providerId,
       selectedModelId: '',
@@ -71,7 +103,13 @@ export const createModelSlice: StateCreator<ChatState, [], [], ModelSlice> = (se
     });
     try {
       const data = await api.getModels(providerId);
-      set({ models: data.models });
+      set({
+        models: data.models,
+        modelsCache: {
+          ...cache,
+          [providerId]: data.models,
+        },
+      });
       if (data.models.length > 0) {
         set({ selectedModelId: data.models[0].id });
       }
