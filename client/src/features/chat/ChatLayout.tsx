@@ -52,12 +52,12 @@ export function ChatLayout() {
     }
   }, [currentConversation?.title]);
 
-  // Navigate to /chat/:id when a new conversation is created
+  // Navigate to /chat/:id when a new conversation is created from the homepage
   useEffect(() => {
     if (
+      !conversationId &&
       currentConversation?.id &&
-      !currentConversation.id.startsWith('pending-') &&
-      conversationId !== currentConversation.id
+      !currentConversation.id.startsWith('pending-')
     ) {
       navigate(`/chat/${currentConversation.id}`);
     }
