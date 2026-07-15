@@ -312,7 +312,7 @@ router.post('/', optionalAuthenticate, async (req: Request, res: Response) => {
       const isNew = req.user ? isNewConversation : (!req.body.messages || req.body.messages.length <= 1);
       if (isNew) {
         try {
-          const title = await ChatService.generateTitle(providerId, modelId, message, userApiKey);
+          const title = await ChatService.generateTitle(providerId, modelId, message, req.user?.userId, userApiKey);
           if (req.user) {
             await prisma.conversation.update({
               where: { id: boundConversationId },

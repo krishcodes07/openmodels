@@ -93,12 +93,15 @@ async function generateSearchQueries(
       `${m.role.toUpperCase()}: ${m.content.substring(0, 200)}`
     ).join('\n');
 
+    const today = new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+
     const response = await provider.chat({
       model: modelId,
       messages: [
         {
           role: 'system',
           content: `You are a search query optimizer. Given the user's question and conversation context, generate 2-3 concise and specific search queries that would find the most relevant and up-to-date information on the web.
+Today's date is: ${today}.
 
 RULES:
 - Return ONLY the queries, one per line
