@@ -283,10 +283,14 @@ router.post('/', optionalAuthenticate, async (req: Request, res: Response) => {
             },
           });
 
-          // Update conversation timestamp
+          // Update conversation timestamp, provider and model
           await prisma.conversation.update({
             where: { id: boundConversationId },
-            data: { updatedAt: new Date() },
+            data: { 
+              updatedAt: new Date(),
+              providerId,
+              modelId,
+            },
           });
         } catch (dbErr: any) {
           console.warn('[Chat] Failed to save assistant message:', dbErr.message);
@@ -348,7 +352,11 @@ router.post('/', optionalAuthenticate, async (req: Request, res: Response) => {
             });
             await prisma.conversation.update({
               where: { id: boundConversationId },
-              data: { updatedAt: new Date() },
+              data: { 
+                updatedAt: new Date(),
+                providerId,
+                modelId,
+              },
             });
           } catch (dbErr) {
             console.warn('[Chat] Failed to save partial assistant message on disconnect:', dbErr);
@@ -548,6 +556,15 @@ router.post('/regenerate', authenticate, async (req: Request, res: Response) => 
         });
 
         res.write(`data: ${JSON.stringify({ type: 'regenerated', newMessageId: newMsg.id, parentMessageId: messageId })}\n\n`);
+
+        await prisma.conversation.update({
+          where: { id: conversationId },
+          data: { 
+            updatedAt: new Date(),
+            providerId,
+            modelId,
+          },
+        });
       } catch (dbErr: any) {
         console.warn('[Chat] Failed to save regenerated response:', dbErr.message);
       }
@@ -582,6 +599,14 @@ router.post('/regenerate', authenticate, async (req: Request, res: Response) => 
                 parentMessageId: messageId,
                 sources: sourcesJson || null,
                 userContent: targetMessage.content,
+              },
+            });
+            await prisma.conversation.update({
+              where: { id: conversationId },
+              data: { 
+                updatedAt: new Date(),
+                providerId,
+                modelId,
               },
             });
           } catch (dbErr) {

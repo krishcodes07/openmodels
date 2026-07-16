@@ -160,7 +160,7 @@ export class NvidiaProvider extends BaseProvider {
       return { role: m.role, content: m.content };
     });
 
-    const modelSupportsThinking = this.supportsThinking(request.model);
+    const requiresThinkingParams = request.model.toLowerCase().includes('r1');
 
     const completionParams: any = {
       model: request.model,
@@ -170,7 +170,7 @@ export class NvidiaProvider extends BaseProvider {
       stream: false,
     };
 
-    if (modelSupportsThinking) {
+    if (requiresThinkingParams) {
       completionParams.extra_body = {
         chat_template_kwargs: {
           enable_thinking: request.thinking !== false,
@@ -211,7 +211,7 @@ export class NvidiaProvider extends BaseProvider {
       return { role: m.role, content: m.content };
     });
 
-    const modelSupportsThinking = this.supportsThinking(request.model);
+    const requiresThinkingParams = request.model.toLowerCase().includes('r1');
 
     const completionParams: any = {
       model: request.model,
@@ -221,7 +221,7 @@ export class NvidiaProvider extends BaseProvider {
       stream: true,
     };
 
-    if (modelSupportsThinking) {
+    if (requiresThinkingParams) {
       completionParams.extra_body = {
         chat_template_kwargs: {
           enable_thinking: request.thinking !== false,

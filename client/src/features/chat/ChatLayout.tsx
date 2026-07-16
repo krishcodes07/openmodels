@@ -19,6 +19,7 @@ export function ChatLayout() {
     fetchModels,
     fetchConversations,
     loadConversation,
+    createNewChat,
     selectedProviderId,
     currentConversation,
     messages,
@@ -40,6 +41,8 @@ export function ChatLayout() {
   useEffect(() => {
     if (conversationId) {
       loadConversation(conversationId);
+    } else {
+      createNewChat();
     }
   }, [conversationId]);
 

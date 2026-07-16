@@ -26,7 +26,6 @@ export function Sidebar() {
     currentConversation,
     isSidebarOpen,
     createNewChat,
-    loadConversation,
     deleteConversation,
     renameConversation,
     toggleSidebar,
@@ -115,7 +114,6 @@ export function Sidebar() {
   };
 
   const handleSelectConversation = (id: string) => {
-    loadConversation(id);
     navigate(`/chat/${id}`);
   };
 
