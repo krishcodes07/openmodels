@@ -25,12 +25,14 @@ export function ChatLayout() {
     messages,
     isSidebarOpen,
     toggleSidebar,
+    fetchPersonas,
   } = useChatStore();
 
   useEffect(() => {
     fetchProviders();
     fetchModels(selectedProviderId);
     fetchConversations();
+    fetchPersonas();
 
     // Auto-collapse sidebar on mobile on initial load
     if (window.innerWidth < 768 && isSidebarOpen) {
@@ -42,7 +44,11 @@ export function ChatLayout() {
     if (conversationId) {
       loadConversation(conversationId);
     } else {
-      createNewChat();
+      // Only reset the chat state if we are transitioning from an existing conversation,
+      // or if we have messages. This preserves activePersonaId set by the Personas page.
+      if (currentConversation !== null || messages.length > 0) {
+        createNewChat();
+      }
     }
   }, [conversationId]);
 

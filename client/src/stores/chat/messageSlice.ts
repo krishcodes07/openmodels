@@ -302,6 +302,8 @@ export const createMessageSlice: StateCreator<ChatState, [], [], MessageSlice> =
             modelId: originModelId,
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString(),
+            personaId: state.activePersonaId || null,
+            persona: state.activePersonaId ? state.personas.find(p => p.id === state.activePersonaId) || null : null,
           };
 
       // Set state and apply garbage collection on anonymous chats
@@ -586,6 +588,8 @@ export const createMessageSlice: StateCreator<ChatState, [], [], MessageSlice> =
           modelId: originModelId,
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
+          personaId: state.activePersonaId || null,
+          persona: state.activePersonaId ? state.personas.find(p => p.id === state.activePersonaId) || null : null,
         };
 
     const streamKey = originConversationId || tempConversation.id;
