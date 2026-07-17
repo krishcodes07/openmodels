@@ -150,4 +150,42 @@ router.delete('/:id', async (req: Request, res: Response) => {
   }
 });
 
+// POST /api/conversations/:id/messages - Add a message directly to DB (e.g. stopped response)
+router.post('/:id/messages', async (req: Request, res: Response) => {
+  try {
+    const id = req.params.id as string;
+    const { role, content, thinkingContent, parentMessageId, userContent } = req.body;
+
+    const conversation = await prisma.conversation.findFirst({
+      where: { id, userId: req.user!.userId },
+    });
+
+    if (!conversation) {
+      res.status(404).json({ error: 'Conversation not found' });
+      return;
+    }
+
+    const message = await prisma.message.create({
+      data: {
+        conversationId: id,
+        role: role || 'ASSISTANT',
+        content: content || '',
+        thinkingContent: thinkingContent || null,
+        parentMessageId: parentMessageId || null,
+        userContent: userContent || null,
+      },
+    });
+
+    await prisma.conversation.update({
+      where: { id },
+      data: { updatedAt: new Date() },
+    });
+
+    res.status(201).json({ message });
+  } catch (error) {
+    console.error('[Conversations] Add message error:', error);
+    res.status(500).json({ error: 'Failed to add message' });
+  }
+});
+
 export default router;

@@ -123,32 +123,9 @@ export const createMessageSlice: StateCreator<ChatState, [], [], MessageSlice> =
       const data = await api.getConversation(id);
       const rawMessages = data.conversation.messages || [];
 
-      // Sanitize: filter out error messages and orphaned user messages
-      // (user messages whose only responses are errors, with no valid assistant response)
-      const sanitizedMessages = rawMessages.filter((msg: any, idx: number) => {
-        // Remove error-style assistant messages
-        if (msg.role === 'ASSISTANT' && msg.content.startsWith('⚠️')) {
-          return false;
-        }
-        // Remove user messages that have no valid assistant response after them
-        if (msg.role === 'USER') {
-          const subsequentMsgs = rawMessages.slice(idx + 1);
-          // Find assistant responses to this user message
-          const hasValidResponse = subsequentMsgs.some((m: any) =>
-            m.role === 'ASSISTANT' && !m.content.startsWith('⚠️') && (m.parentMessageId === msg.id || subsequentMsgs.indexOf(m) === 0)
-          );
-          // If the very next message is an error and there's no valid response, remove this user msg
-          const nextMsg = rawMessages[idx + 1];
-          if (nextMsg && nextMsg.role === 'ASSISTANT' && nextMsg.content.startsWith('⚠️') && !hasValidResponse) {
-            return false;
-          }
-        }
-        return true;
-      });
-
       set({
         currentConversation: data.conversation,
-        messages: sanitizedMessages,
+        messages: rawMessages,
         selectedProviderId: data.conversation.providerId,
         selectedModelId: data.conversation.modelId,
         isLoadingMessages: false,
@@ -1888,6 +1865,17 @@ export const createMessageSlice: StateCreator<ChatState, [], [], MessageSlice> =
             thinkingContent: '',
             regeneratingMessageId: null,
           });
+
+          // Persist stopped response to backend DB so it survives page refresh
+          if (conversationId && !conversationId.startsWith('pending-') && !conversationId.startsWith('anon-')) {
+            const lastUserMsg = messages.filter(m => m.role === 'USER').pop();
+            api.addMessage(conversationId, {
+              role: 'ASSISTANT',
+              content: streamingContent + ' 🟥 *[Response stopped by user]*',
+              thinkingContent: thinkingContent || null,
+              parentMessageId: lastUserMsg?.id || null,
+            }).catch(err => console.warn('[stopResponse] Failed to persist stopped message:', err));
+          }
         }
       } else {
         set({

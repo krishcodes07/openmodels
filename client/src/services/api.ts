@@ -168,6 +168,13 @@ class ApiClient {
     });
   }
 
+  addMessage(conversationId: string, data: { role?: string; content: string; thinkingContent?: string | null; parentMessageId?: string | null; userContent?: string | null }) {
+    return this.request<any>(`/conversations/${conversationId}/messages`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
   // Personas
   getPersonas() {
     return this.request<any>('/personas');
