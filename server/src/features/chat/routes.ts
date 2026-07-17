@@ -243,6 +243,12 @@ router.post('/', optionalAuthenticate, async (req: Request, res: Response) => {
     let fullContent = '';
     let thinkingContent = '';
 
+    // Track client disconnection (crucial for serverless environments like Vercel proxy)
+    let isClientDisconnected = false;
+    const handleClose = () => { isClientDisconnected = true; };
+    req.on('close', handleClose);
+    req.socket?.on('close', handleClose);
+
     try {
       await provider.streamChat(
         {
@@ -253,7 +259,7 @@ router.post('/', optionalAuthenticate, async (req: Request, res: Response) => {
           stream: true,
         },
         (chunk) => {
-          if (res.destroyed || res.writableEnded) {
+          if (isClientDisconnected || res.destroyed || res.writableEnded) {
             throw new Error('Client disconnected');
           }
           if (chunk.content) {
@@ -365,19 +371,20 @@ router.post('/', optionalAuthenticate, async (req: Request, res: Response) => {
         return;
       }
       
-      // Clean up DB: Delete the user message and conversation (if new) on error
+      // Save assistant error message in DB so the user prompt and error persist properly
       if (req.user && userMsgId) {
         try {
-          await prisma.message.delete({
-            where: { id: userMsgId },
+          await prisma.message.create({
+            data: {
+              conversationId: boundConversationId,
+              role: 'ASSISTANT',
+              content: `⚠️ **Error generating response:** ${error.message || 'Unknown error occurred.'}`,
+              parentMessageId: userMsgId,
+              userContent: message,
+            },
           });
-          if (isNewConversation) {
-            await prisma.conversation.delete({
-              where: { id: boundConversationId },
-            });
-          }
         } catch (dbErr) {
-          console.warn('[Chat] Failed to clean up user message/conversation on error:', dbErr);
+          console.warn('[Chat] Failed to save assistant error message:', dbErr);
         }
       }
       
@@ -523,11 +530,16 @@ router.post('/regenerate', authenticate, async (req: Request, res: Response) => 
     let fullContent = '';
     let thinkingContent = '';
 
+    let isClientDisconnected = false;
+    const handleClose = () => { isClientDisconnected = true; };
+    req.on('close', handleClose);
+    req.socket?.on('close', handleClose);
+
     try {
       await provider.streamChat(
         { model: modelId, messages: chatMessages, thinking, webSearch, stream: true },
         (chunk) => {
-          if (res.destroyed || res.writableEnded) {
+          if (isClientDisconnected || res.destroyed || res.writableEnded) {
             throw new Error('Client disconnected');
           }
           if (chunk.content) {
@@ -782,11 +794,16 @@ router.post('/edit', authenticate, async (req: Request, res: Response) => {
     let fullContent = '';
     let thinkingContent = '';
 
+    let isClientDisconnected = false;
+    const handleClose = () => { isClientDisconnected = true; };
+    req.on('close', handleClose);
+    req.socket?.on('close', handleClose);
+
     try {
       await provider.streamChat(
         { model: modelId, messages: chatMessages, thinking, webSearch, stream: true },
         (chunk) => {
-          if (res.destroyed || res.writableEnded) {
+          if (isClientDisconnected || res.destroyed || res.writableEnded) {
             throw new Error('Client disconnected');
           }
           if (chunk.content) {

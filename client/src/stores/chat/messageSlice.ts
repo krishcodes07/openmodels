@@ -852,14 +852,6 @@ export const createMessageSlice: StateCreator<ChatState, [], [], MessageSlice> =
               createdAt: new Date().toISOString(),
             };
 
-            // If this was a new conversation (no originConversationId), the server
-            // deleted it on error. Clear currentConversation so the next sendMessage
-            // creates a fresh conversation instead of hitting "Conversation not found".
-            const conversationCleanup = !originConversationId ? {
-              currentConversation: null,
-              conversations: current.conversations.filter(c => c.id !== finalConvId),
-            } : {};
-
             set({
               messages: [...current.messages, errorMsg],
               isStreaming: false,
@@ -869,7 +861,6 @@ export const createMessageSlice: StateCreator<ChatState, [], [], MessageSlice> =
               streamingContents: cleanedContents,
               thinkingContents: cleanedThinkings,
               streamingSources: cleanedSources,
-              ...conversationCleanup,
             });
             console.error('Stream error:', event.error);
           }
@@ -1884,7 +1875,7 @@ export const createMessageSlice: StateCreator<ChatState, [], [], MessageSlice> =
             regeneratingMessageId: null,
           });
         } else {
-          // For authenticated users, show partial immediately, then sync with server
+          // For authenticated users, show partial immediately in local state
           set({
             activeStreams: nextStreams,
             streamingContents: cleanedContents,
@@ -1897,11 +1888,6 @@ export const createMessageSlice: StateCreator<ChatState, [], [], MessageSlice> =
             thinkingContent: '',
             regeneratingMessageId: null,
           });
-          // Server saves partial with "[Response stopped by user]" marker.
-          // Reload conversation after a short delay to sync with server state.
-          setTimeout(() => {
-            get().loadConversation(conversationId);
-          }, 500);
         }
       } else {
         set({
