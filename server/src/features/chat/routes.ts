@@ -243,11 +243,13 @@ router.post('/', optionalAuthenticate, async (req: Request, res: Response) => {
     let fullContent = '';
     let thinkingContent = '';
 
-    // Track client disconnection (crucial for serverless environments like Vercel proxy)
+    // Track client disconnection (only when the response socket is closed before completion)
     let isClientDisconnected = false;
-    const handleClose = () => { isClientDisconnected = true; };
-    req.on('close', handleClose);
-    req.socket?.on('close', handleClose);
+    res.on('close', () => {
+      if (!res.writableEnded) {
+        isClientDisconnected = true;
+      }
+    });
 
     try {
       await provider.streamChat(
@@ -318,27 +320,28 @@ router.post('/', optionalAuthenticate, async (req: Request, res: Response) => {
 
       }
 
-      // Generate AI title for new conversations (after the response is fully generated)
-      const isNew = req.user ? isNewConversation : (!req.body.messages || req.body.messages.length <= 1);
-      if (isNew) {
-        try {
-          const title = await ChatService.generateTitle(providerId, modelId, message, req.user?.userId, userApiKey);
-          if (req.user) {
-            await prisma.conversation.update({
-              where: { id: boundConversationId },
-              data: { title },
-            });
-          }
-          if (!res.writableEnded) {
-            res.write(`data: ${JSON.stringify({ type: 'title', title, conversationId: boundConversationId })}\n\n`);
-          }
-        } catch (e) {
-          console.error('[Chat] Failed to generate/update title:', e);
-        }
+      // Send done event immediately so the client UI updates without waiting for title generation
+      if (!res.writableEnded) {
+        res.write(`data: ${JSON.stringify({ type: 'done', conversationId: boundConversationId })}\n\n`);
       }
 
-      // Send done event
-      res.write(`data: ${JSON.stringify({ type: 'done', conversationId: boundConversationId })}\n\n`);
+      // Generate AI title for new conversations (non-blocking)
+      const isNew = req.user ? isNewConversation : (!req.body.messages || req.body.messages.length <= 1);
+      if (isNew) {
+        ChatService.generateTitle(providerId, modelId, message, req.user?.userId, userApiKey)
+          .then(async (title) => {
+            if (req.user) {
+              await prisma.conversation.update({
+                where: { id: boundConversationId },
+                data: { title },
+              }).catch(e => console.error('[Chat] Failed to update conversation title in DB:', e));
+            }
+            if (!res.writableEnded) {
+              res.write(`data: ${JSON.stringify({ type: 'title', title, conversationId: boundConversationId })}\n\n`);
+            }
+          })
+          .catch(e => console.error('[Chat] Non-blocking title generation failed:', e));
+      }
 
     } catch (error: any) {
       if (error.message === 'Client disconnected' || res.destroyed || res.writableEnded) {
@@ -368,6 +371,7 @@ router.post('/', optionalAuthenticate, async (req: Request, res: Response) => {
             console.warn('[Chat] Failed to save partial assistant message on disconnect:', dbErr);
           }
         }
+        if (!res.writableEnded) res.end();
         return;
       }
       

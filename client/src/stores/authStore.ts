@@ -62,6 +62,7 @@ export const useAuthStore = create<AuthState>((set) => ({
 
   logout: () => {
     api.clearTokens();
+    localStorage.removeItem('anonymousMessageCount');
     set({ user: null, isAuthenticated: false, isLoading: false, authActionLoading: false });
   },
 

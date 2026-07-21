@@ -209,11 +209,12 @@ class ApiClient {
     onEvent: (event: any) => void,
     signal?: AbortSignal
   ): Promise<void> {
+    const token = this.accessToken || localStorage.getItem('accessToken');
     const response = await fetch(`${API_BASE}/chat`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        ...(this.accessToken ? { Authorization: `Bearer ${this.accessToken}` } : {}),
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
       body: JSON.stringify(data),
       signal,

@@ -43,7 +43,8 @@ export function optionalAuthenticate(req: Request, res: Response, next: NextFunc
     req.user = payload;
     next();
   } catch {
-    // If they supplied an invalid token, reject it
-    res.status(401).json({ error: 'Invalid or expired token' });
+    // If token is invalid or expired, proceed as unauthenticated guest user
+    req.user = undefined;
+    next();
   }
 }

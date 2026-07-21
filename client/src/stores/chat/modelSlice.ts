@@ -20,7 +20,7 @@ export const createModelSlice: StateCreator<ChatState, [], [], ModelSlice> = (se
   models: [],
   modelsCache: {},
   selectedProviderId: 'mistral',
-  selectedModelId: 'mistral-medium-2505',
+  selectedModelId: 'mistral-small-latest',
 
   fetchProviders: async () => {
     try {

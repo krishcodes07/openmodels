@@ -244,7 +244,7 @@ export function SandboxPanel() {
       <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-bg-primary h-[57px]">
         <div className="flex items-center gap-2">
           <Code2 className="w-5 h-5 text-accent" />
-          <h2 className="font-semibold text-text-primary text-sm tracking-wide">Sandbox Sandbox</h2>
+          <h2 className="font-semibold text-text-primary text-sm tracking-wide">Sandbox Preview</h2>
           <span className="text-[10px] px-2 py-0.5 rounded bg-accent/10 border border-accent/20 text-accent font-mono uppercase font-bold">
             {activeSandboxLanguage || 'code'}
           </span>
