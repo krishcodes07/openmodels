@@ -20,6 +20,13 @@ export class MistralProvider extends BaseProvider {
 
   private readonly knownModels: ProviderModel[] = [
     {
+      id: 'mistral-medium-2505',
+      name: 'Mistral Medium 2505',
+      description: 'Mistral medium tier versatile model',
+      contextLength: 131072,
+      capabilities: { supportsVision: false, supportsThinking: false, supportsWebSearch: false, supportsStreaming: true },
+    },
+    {
       id: 'mistral-large-latest',
       name: 'Mistral Large',
       description: 'Mistral\'s flag-ship high-capacity model',
