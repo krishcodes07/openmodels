@@ -1,16 +1,8 @@
-import OpenAI from 'openai';
 import { config } from '../config';
-import { localUrlToBase64 } from '../lib/images';
-import {
-  BaseProvider,
-  ProviderInfo,
-  ProviderModel,
-  ChatRequest,
-  ChatResponse,
-  StreamChunk,
-} from './base.provider';
+import { ProviderInfo, ProviderModel, ChatRequest } from './base.provider';
+import { OpenAICompatibleProvider } from './compat/openai-compatible.provider';
 
-export class ZaiProvider extends BaseProvider {
+export class ZaiProvider extends OpenAICompatibleProvider {
   readonly info: ProviderInfo = {
     id: 'zai',
     name: 'Z.AI',
@@ -187,9 +179,6 @@ export class ZaiProvider extends BaseProvider {
         supportsStreaming: true,
       },
     },
-
-    // Vision
-
     {
       id: 'glm-5v-turbo',
       name: 'GLM 5V Turbo',
@@ -261,9 +250,6 @@ export class ZaiProvider extends BaseProvider {
         supportsStreaming: true,
       },
     },
-
-    // Image & Video
-
     {
       id: 'glm-image',
       name: 'GLM Image',
@@ -321,121 +307,31 @@ export class ZaiProvider extends BaseProvider {
     },
   ];
 
-  private createClient(apiKey: string): OpenAI {
-    return new OpenAI({
-      apiKey,
-      baseURL: config.providers.zai.baseUrl,
-    });
+  protected getBaseUrl(): string {
+    return config.providers.zai.baseUrl;
   }
 
-  async listModels(): Promise<ProviderModel[]> {
+  protected getDefaultApiKey(): string {
+    return config.providers.zai.apiKey;
+  }
+
+  protected override getKnownModels(): ProviderModel[] {
     return this.knownModels;
   }
 
-  async chat(request: ChatRequest, apiKey?: string): Promise<ChatResponse> {
-    const key = this.getApiKey(apiKey, config.providers.zai.apiKey);
-    const client = this.createClient(key);
-
-    const messages = request.messages.map(m => {
-      if (m.imageUrls && m.imageUrls.length > 0) {
-        return {
-          role: m.role,
-          content: [
-            { type: 'text', text: m.content },
-            ...m.imageUrls.map(url => ({ type: 'image_url', image_url: { url: localUrlToBase64(url) } }))
-          ] as any
-        };
-      }
-      return { role: m.role, content: m.content };
-    });
-
-    const completionOptions: any = {
-      model: request.model,
-      messages,
-      max_tokens: request.maxTokens || 4096,
-      temperature: request.temperature ?? 0.7,
-      stream: false,
-    };
-
+  protected override prepareCompletionParams(request: ChatRequest): Record<string, any> {
     const modelSupportsThinking = request.model.includes('5.2') || request.model.includes('5.1') || request.model.includes('4.5') || request.model.includes('reason') || request.model.includes('think');
     if (modelSupportsThinking) {
       if (request.thinking === false) {
-        completionOptions.thinking = { type: 'disabled' };
-        completionOptions.reasoning_effort = 'none';
+        return { thinking: { type: 'disabled' }, reasoning_effort: 'none' };
       } else {
-        completionOptions.thinking = { type: 'enabled' };
-        completionOptions.reasoning_effort = 'high';
+        return { thinking: { type: 'enabled' }, reasoning_effort: 'high' };
       }
     }
-
-    const response = await client.chat.completions.create(completionOptions);
-
-    const choice = response.choices[0];
-    return {
-      content: choice.message?.content || '',
-      thinkingContent: (choice.message as any)?.reasoning_content || (choice.message as any)?.thinking || undefined,
-      tokenCount: response.usage?.total_tokens,
-      finishReason: choice.finish_reason || undefined,
-    };
+    return {};
   }
 
-  async streamChat(
-    request: ChatRequest,
-    onChunk: (chunk: StreamChunk) => void,
-    apiKey?: string
-  ): Promise<void> {
-    const key = this.getApiKey(apiKey, config.providers.zai.apiKey);
-    const client = this.createClient(key);
-
-    const messages = request.messages.map(m => {
-      if (m.imageUrls && m.imageUrls.length > 0) {
-        return {
-          role: m.role,
-          content: [
-            { type: 'text', text: m.content },
-            ...m.imageUrls.map(url => ({ type: 'image_url', image_url: { url: localUrlToBase64(url) } }))
-          ] as any
-        };
-      }
-      return { role: m.role, content: m.content };
-    });
-
-    const completionOptions: any = {
-      model: request.model,
-      messages,
-      max_tokens: request.maxTokens || 4096,
-      temperature: request.temperature ?? 0.7,
-      stream: true,
-    };
-
-    const modelSupportsThinking = request.model.includes('5.2') || request.model.includes('5.1') || request.model.includes('4.5') || request.model.includes('reason') || request.model.includes('think');
-    if (modelSupportsThinking) {
-      if (request.thinking === false) {
-        completionOptions.thinking = { type: 'disabled' };
-        completionOptions.reasoning_effort = 'none';
-      } else {
-        completionOptions.thinking = { type: 'enabled' };
-        completionOptions.reasoning_effort = 'high';
-      }
-    }
-
-    const stream = await client.chat.completions.create(completionOptions) as any;
-
-    for await (const chunk of stream) {
-      const delta = chunk.choices[0]?.delta;
-      if (delta) {
-        if (delta.content) {
-          onChunk({ content: delta.content, done: false });
-        }
-        if ((delta as any).reasoning_content) {
-          onChunk({ thinkingContent: (delta as any).reasoning_content, done: false });
-        }
-        if ((delta as any).thinking) {
-          onChunk({ thinkingContent: (delta as any).thinking, done: false });
-        }
-      }
-    }
-
-    onChunk({ done: true });
+  override async listModels(): Promise<ProviderModel[]> {
+    return this.knownModels;
   }
 }

@@ -1,16 +1,9 @@
 import OpenAI from 'openai';
 import { config } from '../config';
-import { localUrlToBase64 } from '../lib/images';
-import {
-  BaseProvider,
-  ProviderInfo,
-  ProviderModel,
-  ChatRequest,
-  ChatResponse,
-  StreamChunk,
-} from './base.provider';
+import { ProviderInfo, ProviderModel } from './base.provider';
+import { OpenAICompatibleProvider } from './compat/openai-compatible.provider';
 
-export class CloudflareProvider extends BaseProvider {
+export class CloudflareProvider extends OpenAICompatibleProvider {
   readonly info: ProviderInfo = {
     id: 'cloudflare',
     name: 'Cloudflare Workers AI',
@@ -56,7 +49,16 @@ export class CloudflareProvider extends BaseProvider {
     },
   ];
 
-  private getClientAndUrl(apiKey: string): { client: OpenAI; baseURL: string } {
+  protected getBaseUrl(): string {
+    const accountId = config.providers.cloudflare.accountId;
+    return `${config.providers.cloudflare.baseUrl}/${accountId}/ai/v1`;
+  }
+
+  protected getDefaultApiKey(): string {
+    return config.providers.cloudflare.apiKey;
+  }
+
+  protected override createClient(apiKey: string): OpenAI {
     let token = apiKey;
     let accountId = config.providers.cloudflare.accountId;
 
@@ -68,17 +70,19 @@ export class CloudflareProvider extends BaseProvider {
 
     const baseURL = `${config.providers.cloudflare.baseUrl}/${accountId}/ai/v1`;
 
-    const client = new OpenAI({
+    return new OpenAI({
       apiKey: token,
       baseURL,
     });
-
-    return { client, baseURL };
   }
 
-  async listModels(apiKey?: string): Promise<ProviderModel[]> {
+  protected override getKnownModels(): ProviderModel[] {
+    return this.knownModels;
+  }
+
+  override async listModels(apiKey?: string): Promise<ProviderModel[]> {
     try {
-      const key = apiKey || config.providers.cloudflare.apiKey;
+      const key = apiKey || this.getDefaultApiKey();
       if (!key) return this.knownModels;
 
       let token = key;
@@ -93,14 +97,13 @@ export class CloudflareProvider extends BaseProvider {
       if (!accountId) return this.knownModels;
 
       const res = await fetch(
-    `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/models/search`,
-          {
-            headers: {
-              Authorization: `Bearer ${token}`,
-            },
-          }
-        );
-
+        `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/models/search`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }
+      );
 
       const data = await res.json();
       const modelsList = data.result || [];
@@ -131,82 +134,5 @@ export class CloudflareProvider extends BaseProvider {
       console.error('[Cloudflare] Failed to fetch models:', err);
       return this.knownModels;
     }
-  }
-
-  async chat(request: ChatRequest, apiKey?: string): Promise<ChatResponse> {
-    const key = this.getApiKey(apiKey, config.providers.cloudflare.apiKey);
-    const { client } = this.getClientAndUrl(key);
-
-    const messages = request.messages.map(m => {
-      if (m.imageUrls && m.imageUrls.length > 0) {
-        return {
-          role: m.role,
-          content: [
-            { type: 'text', text: m.content },
-            ...m.imageUrls.map(url => ({ type: 'image_url', image_url: { url: localUrlToBase64(url) } }))
-          ] as any
-        };
-      }
-      return { role: m.role, content: m.content };
-    });
-
-    const response = await client.chat.completions.create({
-      model: request.model,
-      messages,
-      max_tokens: request.maxTokens || 4096,
-      temperature: request.temperature ?? 0.7,
-      stream: false,
-    });
-
-    const choice = response.choices[0];
-    return {
-      content: choice.message?.content || '',
-      tokenCount: response.usage?.total_tokens,
-      finishReason: choice.finish_reason || undefined,
-    };
-  }
-
-  async streamChat(
-    request: ChatRequest,
-    onChunk: (chunk: StreamChunk) => void,
-    apiKey?: string
-  ): Promise<void> {
-    const key = this.getApiKey(apiKey, config.providers.cloudflare.apiKey);
-    const { client } = this.getClientAndUrl(key);
-
-    const messages = request.messages.map(m => {
-      if (m.imageUrls && m.imageUrls.length > 0) {
-        return {
-          role: m.role,
-          content: [
-            { type: 'text', text: m.content },
-            ...m.imageUrls.map(url => ({ type: 'image_url', image_url: { url: localUrlToBase64(url) } }))
-          ] as any
-        };
-      }
-      return { role: m.role, content: m.content };
-    });
-
-    const stream = await client.chat.completions.create({
-      model: request.model,
-      messages,
-      max_tokens: request.maxTokens || 8192,
-      temperature: request.temperature ?? 0.7,
-      stream: true,
-    });
-
-    for await (const chunk of stream) {
-      const delta = chunk.choices[0]?.delta as any;
-      if (delta) {
-        if (delta.reasoning_content) {
-          onChunk({ thinkingContent: delta.reasoning_content, done: false });
-        }
-        if (delta.content) {
-          onChunk({ content: delta.content, done: false });
-        }
-      }
-    }
-
-    onChunk({ done: true });
   }
 }

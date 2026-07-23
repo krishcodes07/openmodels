@@ -2,9 +2,9 @@
 // Provider Registry
 // ============================================
 // Central registry for all AI providers.
-// Adding a new provider = import + register. That's it.
+// Allows dynamic registration of provider instances or constructors.
 
-import { BaseProvider } from './base.provider';
+import { BaseProvider, ProviderInfo } from './base.provider';
 import { NvidiaProvider } from './nvidia.provider';
 import { GroqProvider } from './groq.provider';
 import { OpenRouterProvider } from './openrouter.provider';
@@ -20,12 +20,48 @@ import { CloudflareProvider } from './cloudflare.provider';
 import { ZaiProvider } from './zai.provider';
 import { AgnesProvider } from './agnes.provider';
 
-class ProviderRegistry {
+export type ProviderInput = BaseProvider | (new () => BaseProvider);
+
+/**
+ * Default list of built-in providers registered on startup.
+ */
+export const ALL_PROVIDERS: ProviderInput[] = [
+  NvidiaProvider,
+  GroqProvider,
+  OpenRouterProvider,
+  GeminiProvider,
+  MistralProvider,
+  GithubModelsProvider,
+  CerebrasProvider,
+  SambanovaProvider,
+  HuggingFaceProvider,
+  OpenCodeProvider,
+  CohereProvider,
+  CloudflareProvider,
+  ZaiProvider,
+  AgnesProvider,
+];
+
+export class ProviderRegistry {
   private providers = new Map<string, BaseProvider>();
 
-  register(provider: BaseProvider): void {
+  /**
+   * Register a provider instance or constructor.
+   */
+  register(providerInput: ProviderInput): BaseProvider {
+    const provider = typeof providerInput === 'function' ? new providerInput() : providerInput;
     this.providers.set(provider.info.id, provider);
-    console.log(`[Registry] Registered provider: ${provider.info.name}`);
+    console.log(`[Registry] Registered provider: ${provider.info.name} (${provider.info.id})`);
+    return provider;
+  }
+
+  /**
+   * Register multiple providers (instances or constructors) at once.
+   */
+  registerAll(providerInputs: ProviderInput[]): void {
+    for (const input of providerInputs) {
+      this.register(input);
+    }
   }
 
   get(id: string): BaseProvider | undefined {
@@ -36,32 +72,19 @@ class ProviderRegistry {
     return Array.from(this.providers.values());
   }
 
-  getAllInfo() {
+  getAllInfo(): ProviderInfo[] {
     return this.getAll().map(p => p.info);
   }
 
   has(id: string): boolean {
     return this.providers.has(id);
   }
+
+  clear(): void {
+    this.providers.clear();
+  }
 }
 
-// Singleton instance
+// Singleton instance auto-populated with built-in providers
 export const providerRegistry = new ProviderRegistry();
-
-// Register all providers
-providerRegistry.register(new NvidiaProvider());
-providerRegistry.register(new GroqProvider());
-providerRegistry.register(new OpenRouterProvider());
-providerRegistry.register(new GeminiProvider());
-providerRegistry.register(new MistralProvider());
-providerRegistry.register(new GithubModelsProvider());
-providerRegistry.register(new CerebrasProvider());
-providerRegistry.register(new SambanovaProvider());
-providerRegistry.register(new HuggingFaceProvider());
-
-providerRegistry.register(new OpenCodeProvider());
-providerRegistry.register(new CohereProvider());
-providerRegistry.register(new CloudflareProvider());
-providerRegistry.register(new ZaiProvider());
-providerRegistry.register(new AgnesProvider());
-
+providerRegistry.registerAll(ALL_PROVIDERS);

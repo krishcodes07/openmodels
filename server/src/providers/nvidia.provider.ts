@@ -1,16 +1,8 @@
-import OpenAI from 'openai';
 import { config } from '../config';
-import { localUrlToBase64 } from '../lib/images';
-import {
-  BaseProvider,
-  ProviderInfo,
-  ProviderModel,
-  ChatRequest,
-  ChatResponse,
-  StreamChunk,
-} from './base.provider';
+import { ProviderInfo, ProviderModel, ChatRequest } from './base.provider';
+import { OpenAICompatibleProvider } from './compat/openai-compatible.provider';
 
-export class NvidiaProvider extends BaseProvider {
+export class NvidiaProvider extends OpenAICompatibleProvider {
   readonly info: ProviderInfo = {
     id: 'nvidia',
     name: 'NVIDIA NIM',
@@ -18,7 +10,6 @@ export class NvidiaProvider extends BaseProvider {
     requiresApiKey: true,
   };
 
-  // NVIDIA NIM models - dynamically fetched when possible, fallback to curated list
   private readonly knownModels: ProviderModel[] = [
     {
       id: 'meta/llama-3.3-70b-instruct',
@@ -71,11 +62,31 @@ export class NvidiaProvider extends BaseProvider {
     },
   ];
 
-  private createClient(apiKey: string): OpenAI {
-    return new OpenAI({
-      apiKey,
-      baseURL: config.providers.nvidia.baseUrl,
-    });
+  protected getBaseUrl(): string {
+    return config.providers.nvidia.baseUrl;
+  }
+
+  protected getDefaultApiKey(): string {
+    return config.providers.nvidia.apiKey;
+  }
+
+  protected override getKnownModels(): ProviderModel[] {
+    return this.knownModels;
+  }
+
+  protected override prepareCompletionParams(request: ChatRequest): Record<string, any> {
+    const requiresThinkingParams = request.model.toLowerCase().includes('r1');
+    if (requiresThinkingParams) {
+      return {
+        extra_body: {
+          chat_template_kwargs: {
+            enable_thinking: request.thinking !== false,
+            clear_thinking: false,
+          },
+        },
+      };
+    }
+    return {};
   }
 
   private supportsThinking(modelId: string): boolean {
@@ -104,9 +115,9 @@ export class NvidiaProvider extends BaseProvider {
            idLower.includes('qwen-vl');
   }
 
-  async listModels(apiKey?: string): Promise<ProviderModel[]> {
+  override async listModels(apiKey?: string): Promise<ProviderModel[]> {
     try {
-      const key = apiKey || config.providers.nvidia.apiKey;
+      const key = apiKey || this.getDefaultApiKey();
       if (!key) return this.knownModels;
 
       const client = this.createClient(key);
@@ -141,112 +152,5 @@ export class NvidiaProvider extends BaseProvider {
       console.error('[Nvidia] Failed to fetch models:', err);
       return this.knownModels;
     }
-  }
-
-  async chat(request: ChatRequest, apiKey?: string): Promise<ChatResponse> {
-    const key = this.getApiKey(apiKey, config.providers.nvidia.apiKey);
-    const client = this.createClient(key);
-
-    const messages = request.messages.map(m => {
-      if (m.imageUrls && m.imageUrls.length > 0) {
-        return {
-          role: m.role,
-          content: [
-            { type: 'text', text: m.content },
-            ...m.imageUrls.map(url => ({ type: 'image_url', image_url: { url: localUrlToBase64(url) } }))
-          ] as any
-        };
-      }
-      return { role: m.role, content: m.content };
-    });
-
-    const requiresThinkingParams = request.model.toLowerCase().includes('r1');
-
-    const completionParams: any = {
-      model: request.model,
-      messages,
-      max_tokens: request.maxTokens || 4096,
-      temperature: request.temperature ?? 0.7,
-      stream: false,
-    };
-
-    if (requiresThinkingParams) {
-      completionParams.extra_body = {
-        chat_template_kwargs: {
-          enable_thinking: request.thinking !== false,
-          clear_thinking: false
-        }
-      };
-    }
-
-    const response = await client.chat.completions.create(completionParams);
-
-    const choice = response.choices[0];
-    return {
-      content: choice.message?.content || '',
-      thinkingContent: (choice.message as any)?.reasoning_content || (choice.message as any)?.thinking || undefined,
-      tokenCount: response.usage?.total_tokens,
-      finishReason: choice.finish_reason || undefined,
-    };
-  }
-
-  async streamChat(
-    request: ChatRequest,
-    onChunk: (chunk: StreamChunk) => void,
-    apiKey?: string
-  ): Promise<void> {
-    const key = this.getApiKey(apiKey, config.providers.nvidia.apiKey);
-    const client = this.createClient(key);
-
-    const messages = request.messages.map(m => {
-      if (m.imageUrls && m.imageUrls.length > 0) {
-        return {
-          role: m.role,
-          content: [
-            { type: 'text', text: m.content },
-            ...m.imageUrls.map(url => ({ type: 'image_url', image_url: { url: localUrlToBase64(url) } }))
-          ] as any
-        };
-      }
-      return { role: m.role, content: m.content };
-    });
-
-    const requiresThinkingParams = request.model.toLowerCase().includes('r1');
-
-    const completionParams: any = {
-      model: request.model,
-      messages,
-      max_tokens: request.maxTokens || 8192,
-      temperature: request.temperature ?? 0.7,
-      stream: true,
-    };
-
-    if (requiresThinkingParams) {
-      completionParams.extra_body = {
-        chat_template_kwargs: {
-          enable_thinking: request.thinking !== false,
-          clear_thinking: false
-        }
-      };
-    }
-
-    const stream = await client.chat.completions.create(completionParams) as any;
-
-    for await (const chunk of stream) {
-      const delta = chunk.choices[0]?.delta;
-      if (delta) {
-        if (delta.content) {
-          onChunk({ content: delta.content, done: false });
-        }
-        if ((delta as any).reasoning_content) {
-          onChunk({ thinkingContent: (delta as any).reasoning_content, done: false });
-        }
-        if ((delta as any).thinking) {
-          onChunk({ thinkingContent: (delta as any).thinking, done: false });
-        }
-      }
-    }
-
-    onChunk({ done: true });
   }
 }
