@@ -259,6 +259,7 @@ router.post('/', optionalAuthenticate, async (req: Request, res: Response) => {
           thinking,
           webSearch,
           stream: true,
+          maxTokens: 65536,
         },
         (chunk) => {
           if (isClientDisconnected || res.destroyed || res.writableEnded) {
@@ -541,7 +542,7 @@ router.post('/regenerate', authenticate, async (req: Request, res: Response) => 
 
     try {
       await provider.streamChat(
-        { model: modelId, messages: chatMessages, thinking, webSearch, stream: true },
+        { model: modelId, messages: chatMessages, thinking, webSearch, stream: true, maxTokens: 65536 },
         (chunk) => {
           if (isClientDisconnected || res.destroyed || res.writableEnded) {
             throw new Error('Client disconnected');
@@ -805,7 +806,7 @@ router.post('/edit', authenticate, async (req: Request, res: Response) => {
 
     try {
       await provider.streamChat(
-        { model: modelId, messages: chatMessages, thinking, webSearch, stream: true },
+        { model: modelId, messages: chatMessages, thinking, webSearch, stream: true, maxTokens: 65536 },
         (chunk) => {
           if (isClientDisconnected || res.destroyed || res.writableEnded) {
             throw new Error('Client disconnected');

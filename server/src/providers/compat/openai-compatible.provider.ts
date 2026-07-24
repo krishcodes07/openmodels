@@ -83,7 +83,7 @@ export abstract class OpenAICompatibleProvider extends BaseProvider {
     const completionParams: OpenAI.Chat.ChatCompletionCreateParamsNonStreaming = {
       model: request.model,
       messages,
-      max_tokens: request.maxTokens || 4096,
+      max_tokens: request.maxTokens || 65536,
       temperature: request.temperature ?? 0.7,
       stream: false,
       ...extraParams,
@@ -117,7 +117,7 @@ export abstract class OpenAICompatibleProvider extends BaseProvider {
     const completionParams: OpenAI.Chat.ChatCompletionCreateParamsStreaming = {
       model: request.model,
       messages,
-      max_tokens: request.maxTokens || 4096,
+      max_tokens: request.maxTokens || 65536,
       temperature: request.temperature ?? 0.7,
       stream: true,
       ...extraParams,
